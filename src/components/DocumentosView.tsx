@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { FileInput, FilePlus2, FileText, Mail, Printer, Send, ShieldCheck } from 'lucide-react';
+import { FileCheck2, FileInput, FilePlus2, FileText, Mail, Printer, Send, ShieldCheck } from 'lucide-react';
 import * as api from '../services/api';
-import { DocumentoLista, Meta } from '../types';
+import { DocumentoLista, Meta, ResultadoValidacao } from '../types';
 import { Botao, Confirmacao, Etiqueta, Secao, Texto, Vazio } from './ui';
-import { PainelRespostas, useOperacao } from './PainelRespostas';
+import { ListaErrosSchema, PainelRespostas, useOperacao } from './PainelRespostas';
 import { NovaNFeView } from './NovaNFeView';
 import { AMBIENTES, SITUACOES, formatarChave, formatarDataHora, formatarMoeda } from '../utils/formatters';
 
@@ -15,7 +15,7 @@ export const DocumentosView: React.FC<{ meta: Meta | null; onRecarregarPainel: (
   meta,
   onRecarregarPainel,
 }) => {
-  const { retorno, erro, carregando, executar, setErro } = useOperacao();
+  const { retorno, erro, errosSchema, carregando, executar, setErro, falhar } = useOperacao();
 
   const [documentos, setDocumentos] = useState<DocumentoLista[]>([]);
   const [selecionado, setSelecionado] = useState<DocumentoLista | null>(null);
@@ -24,6 +24,7 @@ export const DocumentosView: React.FC<{ meta: Meta | null; onRecarregarPainel: (
   const [emailPara, setEmailPara] = useState('');
   const [enviandoEmail, setEnviandoEmail] = useState<DocumentoLista | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
+  const [resultadoSchema, setResultadoSchema] = useState<{ numero: number; resultado: ResultadoValidacao } | null>(null);
   const arquivoRef = useRef<HTMLInputElement>(null);
 
   const carregar = () => api.listarDocumentos().then(setDocumentos).catch(() => setDocumentos([]));
@@ -56,6 +57,23 @@ export const DocumentosView: React.FC<{ meta: Meta | null; onRecarregarPainel: (
       setAviso(r.valida ? 'Assinatura digital válida.' : `Assinatura inválida: ${r.erro}`);
     } catch (err: any) {
       setErro(err.message);
+    }
+  };
+
+  /** "Validar XML" do exemplo: confere contra o XSD oficial sem enviar nada */
+  const validarSchema = async (doc: DocumentoLista) => {
+    setErro(null);
+    setResultadoSchema(null);
+    try {
+      const resultado = await api.validarXml({ chave: doc.chave });
+      if (resultado.valido) {
+        setAviso(`NF-e nº ${doc.numero}: XML válido contra ${resultado.schema}.`);
+      } else {
+        setAviso(null);
+        setResultadoSchema({ numero: doc.numero, resultado });
+      }
+    } catch (err: any) {
+      falhar(err);
     }
   };
 
@@ -102,6 +120,21 @@ export const DocumentosView: React.FC<{ meta: Meta | null; onRecarregarPainel: (
           text-blue-800 dark:text-blue-300 rounded-xl px-4 py-2.5 flex items-center justify-between gap-3">
           <span>{aviso}</span>
           <button type="button" className="font-bold cursor-pointer" onClick={() => setAviso(null)}>×</button>
+        </div>
+      )}
+
+      {resultadoSchema && (
+        <div className="text-xs bg-white dark:bg-stone-900 border border-red-200 dark:border-red-900 rounded-xl px-4 py-3">
+          <div className="flex items-start justify-between gap-3">
+            <span className="font-semibold text-red-700 dark:text-red-300">
+              NF-e nº {resultadoSchema.numero}: o XML não passa no schema oficial
+              ({resultadoSchema.resultado.erros.length} problema{resultadoSchema.resultado.erros.length === 1 ? '' : 's'}).
+            </span>
+            <button type="button" className="font-bold cursor-pointer text-stone-400" onClick={() => setResultadoSchema(null)}>
+              ×
+            </button>
+          </div>
+          <ListaErrosSchema erros={resultadoSchema.resultado.erros} schema={resultadoSchema.resultado.schema} />
         </div>
       )}
 
@@ -188,6 +221,9 @@ export const DocumentosView: React.FC<{ meta: Meta | null; onRecarregarPainel: (
                             >
                               E-mail
                             </Botao>
+                            <Botao icone={<FileCheck2 className="w-3.5 h-3.5" />} onClick={() => validarSchema(d)}>
+                              Validar XML
+                            </Botao>
                             <Botao icone={<ShieldCheck className="w-3.5 h-3.5" />} onClick={() => validarAssinatura(d)}>
                               Assinatura
                             </Botao>
@@ -227,6 +263,7 @@ export const DocumentosView: React.FC<{ meta: Meta | null; onRecarregarPainel: (
       <PainelRespostas
         retorno={retorno}
         erro={erro}
+        errosSchema={errosSchema}
         carregando={carregando}
         resumo={[
           ['Recibo do lote', retorno?.dados?.recibo],

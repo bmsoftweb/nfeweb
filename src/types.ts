@@ -117,6 +117,25 @@ export interface Meta {
   modelos: { valor: string; rotulo: string }[];
 }
 
+/** Um problema apontado pelo XSD */
+export interface ErroSchema {
+  campo?: string;
+  mensagem: string;
+}
+
+export interface ResultadoValidacao {
+  valido: boolean;
+  /** Arquivo .xsd contra o qual o documento foi conferido */
+  schema: string;
+  erros: ErroSchema[];
+}
+
+/** Erro devolvido pela API; na falha de schema vem com a lista de problemas */
+export interface ErroApi extends Error {
+  errosSchema?: ErroSchema[];
+  schema?: string;
+}
+
 /** Retorno padronizado de toda operação com a SEFAZ */
 export interface Retorno {
   sucesso: boolean;

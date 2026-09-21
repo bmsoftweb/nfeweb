@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { ArrowLeft, Plus, Save, Send, Trash2 } from 'lucide-react';
 import * as api from '../services/api';
 import { Meta } from '../types';
-import { Area, Botao, Campo, Confirmacao, Secao, Selecao, Texto, Vazio } from './ui';
+import { ALTURA_CONTROLE, Area, Botao, Campo, Confirmacao, Secao, Selecao, Texto, Vazio } from './ui';
+import { Toggle } from './Toggle';
 import { NumberField } from './NumberField';
 import { DateField } from './DateField';
 import { PainelRespostas, useOperacao } from './PainelRespostas';
@@ -56,7 +57,7 @@ export const NovaNFeView: React.FC<{
   onCancelar: () => void;
   onEmitida: () => void;
 }> = ({ meta, onCancelar, onEmitida }) => {
-  const { retorno, erro, carregando, executar, setErro } = useOperacao();
+  const { retorno, erro, errosSchema, carregando, executar, setErro, falhar } = useOperacao();
 
   const [naturezaOperacao, setNaturezaOperacao] = useState('VENDA DE MERCADORIA');
   const [serie, setSerie] = useState('1');
@@ -64,7 +65,7 @@ export const NovaNFeView: React.FC<{
   const [dataEmissao, setDataEmissao] = useState(hoje());
   const [tipoDocumento, setTipoDocumento] = useState('1');
   const [finalidade, setFinalidade] = useState('1');
-  const [consumidorFinal, setConsumidorFinal] = useState('0');
+  const [consumidorFinal, setConsumidorFinal] = useState(false);
   const [presencial, setPresencial] = useState('1');
 
   const [destDocumento, setDestDocumento] = useState('');
@@ -88,6 +89,11 @@ export const NovaNFeView: React.FC<{
   const [chaveGerada, setChaveGerada] = useState('');
   const [confirmandoEnvio, setConfirmandoEnvio] = useState(false);
 
+  // Não contribuinte é sempre consumidor final (rejeição 696): o toggle trava em Sim.
+  // O servidor confere a mesma regra, para valer também para quem chama a API direto.
+  const naoContribuinte = destIndIE === '9';
+  const consumidorFinalEfetivo = naoContribuinte || consumidorFinal;
+
   const total = itens.reduce(
     (acc, i) => acc + Number(i.quantidade || 0) * Number(i.valorUnitario || 0),
     0,
@@ -105,7 +111,7 @@ export const NovaNFeView: React.FC<{
       dataEmissao,
       tipoDocumento: Number(tipoDocumento),
       finalidade: Number(finalidade),
-      consumidorFinal: Number(consumidorFinal),
+      consumidorFinal: consumidorFinalEfetivo ? 1 : 0,
       presencial: Number(presencial),
       idDestino: destUf ? 1 : 1,
     },
@@ -168,7 +174,9 @@ export const NovaNFeView: React.FC<{
       const resposta = await api.gerarNFe(montarDocumento());
       setChaveGerada(resposta.chave);
     } catch (err: any) {
-      setErro(err.message);
+      // Sem chave, o "Transmitir" volta a ficar bloqueado até gerar um XML válido
+      setChaveGerada('');
+      falhar(err);
     }
   };
 
@@ -241,16 +249,21 @@ export const NovaNFeView: React.FC<{
             ]}
             className="lg:col-span-3"
           />
-          <Selecao
+          <Campo
             rotulo="Consumidor final"
-            value={consumidorFinal}
-            onChange={(e) => setConsumidorFinal(e.target.value)}
-            opcoes={[
-              { valor: '0', rotulo: 'Não' },
-              { valor: '1', rotulo: 'Sim' },
-            ]}
+            dica={naoContribuinte ? 'Obrigatório para destinatário não contribuinte (rejeição 696)' : undefined}
             className="lg:col-span-3"
-          />
+          >
+            {/* Mesma altura dos selects vizinhos, para a linha ficar alinhada */}
+            <div className={`${ALTURA_CONTROLE} flex items-center`}>
+              <Toggle
+                checked={consumidorFinalEfetivo}
+                onChange={setConsumidorFinal}
+                disabled={naoContribuinte}
+                title={naoContribuinte ? 'Travado em Sim: o destinatário é não contribuinte' : undefined}
+              />
+            </div>
+          </Campo>
           <Selecao
             rotulo="Presença do comprador"
             value={presencial}
@@ -556,6 +569,7 @@ export const NovaNFeView: React.FC<{
       <PainelRespostas
         retorno={retorno}
         erro={erro}
+        errosSchema={errosSchema}
         carregando={carregando}
         resumo={[
           ['Recibo do lote', retorno?.dados?.recibo],

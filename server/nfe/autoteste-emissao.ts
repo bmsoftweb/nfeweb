@@ -17,6 +17,10 @@ import { gerarDanfe } from './danfe.js';
 import { CONFIG_PADRAO } from '../config.js';
 import { chaveValida } from './chave.js';
 import { semDeclaracao } from './xml.js';
+import { montarEvento, montarInutilizacao, PedidoEvento } from './operacoes.js';
+import {
+  FalhaSchema, ResultadoValidacao, exigirValido, validarEvento, validarInutilizacao, validarNFe, validarQualquer,
+} from './validacao.js';
 
 function conferir(nome: string, fn: () => void | Promise<void>) {
   return Promise.resolve(fn()).then(() => console.log(`  ok  ${nome}`));
@@ -157,6 +161,27 @@ async function principal() {
     }
   });
 
+  await conferir('não contribuinte sem consumidor final é barrado (rejeição 696)', () => {
+    const errado = { ...documento, ide: { ...documento.ide, consumidorFinal: 0 } };
+    assert.throws(() => gerarNFe(ctx, errado as any), /696/);
+  });
+
+  await conferir('operação com o exterior fica fora da regra 696', () => {
+    const exterior = { ...documento, ide: { ...documento.ide, consumidorFinal: 0, idDestino: 3 } };
+    assert.doesNotThrow(() => gerarNFe(ctx, exterior as any));
+  });
+
+  await conferir('IE informada sem indicador vira contribuinte e leva a tag <IE>', () => {
+    const contribuinte = {
+      ...documento,
+      ide: { ...documento.ide, consumidorFinal: 0 },
+      destinatario: { ...documento.destinatario, indIEDest: undefined, inscricaoEstadual: '123.456.789' },
+    };
+    const xml = gerarNFe(ctx, contribuinte as any).xml;
+    assert.ok(xml.includes('<indIEDest>1</indIEDest>'), 'indicador devia ser 1');
+    assert.ok(xml.includes('<IE>123456789</IE>'), 'a IE do destinatário não podia sumir');
+  });
+
   await conferir('em homologação o nome do destinatário é substituído', () => {
     assert.ok(gerada.xml.includes('NF-E EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL'));
     assert.ok(!gerada.xml.includes('CLIENTE EXEMPLO LTDA'));
@@ -195,6 +220,101 @@ async function principal() {
     assert.ok(nfce.xml.includes('<infNFeSupl>'));
     assert.ok(nfce.xml.includes('<qrCode>'));
     assert.ok(/\|2\|2\|/.test(nfce.xml), 'o QR-Code deve trazer versão 2 e ambiente 2');
+  });
+
+  // --- Schemas oficiais (recursos/Schemas) ---------------------------------
+
+  const semErros = (r: ResultadoValidacao) =>
+    `${r.schema}: ${r.erros.map((e) => `${e.campo ?? ''} ${e.mensagem}`).join(' | ')}`;
+
+  await conferir('NF-e assinada passa no nfe_v4.00.xsd', async () => {
+    const r = await validarNFe(assinado);
+    assert.ok(r.valido, semErros(r));
+    assert.strictEqual(r.schema, 'nfe_v4.00.xsd');
+  });
+
+  await conferir('NFC-e assinada passa no nfe_v4.00.xsd (com QR-Code)', async () => {
+    const ctxNfce = contexto('65');
+    const nfce = gerarNFe(ctxNfce, documento as any);
+    const nfceAssinada = assinar(semDeclaracao(nfce.xml), 'infNFe', `NFe${nfce.chave}`, ctxNfce.certificado);
+    const r = await validarNFe(nfceAssinada);
+    assert.ok(r.valido, semErros(r));
+  });
+
+  await conferir('NCM inválido é barrado, apontando o campo', async () => {
+    const r = await validarNFe(assinado.replace('<NCM>84713012</NCM>', '<NCM>8471301</NCM>'));
+    assert.ok(!r.valido, 'NCM com 7 dígitos não podia passar');
+    assert.ok(r.erros.some((e) => e.campo === 'NCM'), `o erro devia apontar NCM: ${semErros(r)}`);
+    assert.ok(/não atende ao formato/.test(r.erros[0].mensagem), 'a mensagem devia sair em português');
+  });
+
+  await conferir('grupo fora de ordem é barrado', async () => {
+    const trocado = assinado.replace(/(<ide>[\s\S]*?<\/ide>)(<emit>[\s\S]*?<\/emit>)/, '$2$1');
+    const r = await validarNFe(trocado);
+    assert.ok(!r.valido);
+    assert.ok(r.erros.some((e) => /fora de ordem/.test(e.mensagem)), semErros(r));
+  });
+
+  await conferir('"Exibir erro de schema" desligado esconde o detalhe', async () => {
+    const r = await validarNFe(assinado.replace('<NCM>84713012</NCM>', '<NCM>1</NCM>'));
+    const capturar = (detalhar: boolean) => {
+      try {
+        exigirValido(r, 'Falha na validação dos dados da nota: 123', detalhar);
+      } catch (e) {
+        return e as FalhaSchema;
+      }
+      throw new Error('exigirValido devia ter barrado');
+    };
+
+    const comDetalhe = capturar(true);
+    const semDetalhe = capturar(false);
+    assert.ok(comDetalhe.message.includes('NCM'), 'com a opção ligada a mensagem traz o campo');
+    assert.strictEqual(semDetalhe.message, 'Falha na validação dos dados da nota: 123');
+    assert.strictEqual(semDetalhe.detalhar, false);
+  });
+
+  // Eventos: o lote contra envEvento_v1.00 e o detEvento contra e<código>_v1.00
+  const eventos: [string, Partial<PedidoEvento>][] = [
+    ['110111 cancelamento', { protocolo: '135260000000001', justificativa: 'Cancelamento por erro de digitacao no pedido' }],
+    ['110110 carta de correção', { correcao: 'Correcao do endereco de entrega informado no pedido' }],
+    ['210210 ciência da operação', {}],
+    ['210240 operação não realizada', { justificativa: 'Mercadoria devolvida antes da entrega ao cliente' }],
+  ];
+
+  for (const [rotulo, extras] of eventos) {
+    await conferir(`evento ${rotulo} passa nos dois schemas`, async () => {
+      const { mensagem, tipo } = montarEvento(ctx, { chave: gerada.chave, tipoEvento: rotulo.slice(0, 6), ...extras });
+      const r = await validarEvento(mensagem, tipo.codigo);
+      assert.ok(r.valido, semErros(r));
+    });
+  }
+
+  await conferir('protocolo curto no cancelamento é barrado pelo e110111', async () => {
+    // nProt tem 15 dígitos no schema específico; o envEvento genérico não sabe disso
+    const { mensagem } = montarEvento(ctx, {
+      chave: gerada.chave,
+      tipoEvento: '110111',
+      protocolo: '123',
+      justificativa: 'Cancelamento por erro de digitacao no pedido',
+    });
+    const r = await validarEvento(mensagem, '110111');
+    assert.ok(!r.valido, 'protocolo de 3 dígitos não podia passar');
+    assert.strictEqual(r.schema, 'e110111_v1.00.xsd', 'quem barra é o schema específico do evento');
+  });
+
+  await conferir('inutilização passa no inutNFe_v4.00.xsd', async () => {
+    const { assinado: inut } = montarInutilizacao(ctx, {
+      ano: 2026, modelo: '55', serie: 1, numeroInicial: 10, numeroFinal: 12,
+      justificativa: 'Numeracao pulada por falha no sistema emissor',
+    });
+    const r = await validarInutilizacao(inut);
+    assert.ok(r.valido, semErros(r));
+  });
+
+  await conferir('validarQualquer reconhece o tipo pela raiz', async () => {
+    assert.strictEqual((await validarQualquer(assinado)).schema, 'nfe_v4.00.xsd');
+    const { mensagem } = montarEvento(ctx, { chave: gerada.chave, tipoEvento: '210210' });
+    assert.strictEqual((await validarQualquer(mensagem)).schema, 'e210210_v1.00.xsd');
   });
 
   console.log('\nTudo certo.');

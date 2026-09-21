@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { CheckCircle2, Clipboard, Download, XCircle } from 'lucide-react';
-import { Retorno } from '../types';
+import { ErroApi, ErroSchema, Retorno } from '../types';
 import { Abas, Botao, Vazio } from './ui';
 
 /**
@@ -11,10 +11,31 @@ import { Abas, Botao, Vazio } from './ui';
 interface PainelRespostasProps {
   retorno: Retorno | null;
   erro?: string | null;
+  /** Problemas apontados pelo XSD quando o envio foi barrado pela validação */
+  errosSchema?: ErroSchema[] | null;
   carregando?: boolean;
   /** Linhas montadas pela tela, exibidas na aba "Respostas" */
   resumo?: [string, any][];
 }
+
+/** Lista dos problemas de schema, um por linha, com o campo em destaque */
+export const ListaErrosSchema: React.FC<{ erros: ErroSchema[]; schema?: string }> = ({ erros, schema }) => (
+  <div className="mt-2 flex flex-col gap-1.5">
+    <ul className="flex flex-col divide-y divide-red-100 dark:divide-red-900/60 border border-red-100 dark:border-red-900/60 rounded-lg overflow-hidden">
+      {erros.map((e, i) => (
+        <li key={i} className="px-3 py-2 text-[11px] bg-red-50/60 dark:bg-red-950/30 flex flex-wrap gap-x-2">
+          {e.campo && (
+            <span className="font-mono font-bold text-red-800 dark:text-red-300">{e.campo}</span>
+          )}
+          <span className="text-stone-700 dark:text-stone-300">{e.mensagem}</span>
+        </li>
+      ))}
+    </ul>
+    {schema && (
+      <span className="text-[10px] text-stone-400 dark:text-stone-500">Conferido contra {schema}</span>
+    )}
+  </div>
+);
 
 function baixar(texto: string, nome: string) {
   const url = URL.createObjectURL(new Blob([texto], { type: 'application/xml' }));
@@ -56,7 +77,7 @@ const Bloco: React.FC<{ texto: string; nomeArquivo: string }> = ({ texto, nomeAr
   );
 };
 
-export const PainelRespostas: React.FC<PainelRespostasProps> = ({ retorno, erro, carregando, resumo }) => {
+export const PainelRespostas: React.FC<PainelRespostasProps> = ({ retorno, erro, errosSchema, carregando, resumo }) => {
   const [aba, setAba] = useState('respostas');
 
   if (carregando) {
@@ -72,7 +93,17 @@ export const PainelRespostas: React.FC<PainelRespostasProps> = ({ retorno, erro,
       <div className="bg-white dark:bg-stone-900 border border-red-200 dark:border-red-900 rounded-xl p-4">
         <div className="flex items-start gap-2 text-xs text-red-700 dark:text-red-300">
           <XCircle className="w-4 h-4 shrink-0 mt-px" />
-          <span>{erro}</span>
+          <div className="min-w-0 flex-1">
+            <span className="font-semibold">{erro}</span>
+            {errosSchema?.length ? (
+              <>
+                <p className="mt-1 text-[11px] text-stone-500 dark:text-stone-400">
+                  O XML não passou no schema oficial, então nada foi enviado à SEFAZ.
+                </p>
+                <ListaErrosSchema erros={errosSchema} />
+              </>
+            ) : null}
+          </div>
         </div>
       </div>
     );
@@ -148,8 +179,21 @@ export const PainelRespostas: React.FC<PainelRespostasProps> = ({ retorno, erro,
 /** Estado compartilhado por todas as telas que disparam uma operação */
 export function useOperacao() {
   const [retorno, setRetorno] = useState<Retorno | null>(null);
-  const [erro, setErro] = useState<string | null>(null);
+  const [erro, setErroTexto] = useState<string | null>(null);
+  const [errosSchema, setErrosSchema] = useState<ErroSchema[] | null>(null);
   const [carregando, setCarregando] = useState(false);
+
+  /** Mensagem simples; limpa a lista de schema que tenha sobrado */
+  const setErro = (texto: string | null) => {
+    setErroTexto(texto);
+    setErrosSchema(null);
+  };
+
+  /** Registra um erro da API, preservando a lista de problemas de schema */
+  const falhar = (err: ErroApi) => {
+    setErroTexto(err.message || String(err));
+    setErrosSchema(err.errosSchema?.length ? err.errosSchema : null);
+  };
 
   const executar = async (fn: () => Promise<Retorno>) => {
     setCarregando(true);
@@ -158,11 +202,11 @@ export function useOperacao() {
     try {
       setRetorno(await fn());
     } catch (err: any) {
-      setErro(err.message || String(err));
+      falhar(err);
     } finally {
       setCarregando(false);
     }
   };
 
-  return { retorno, erro, carregando, executar, setErro };
+  return { retorno, erro, errosSchema, carregando, executar, setErro, falhar };
 }

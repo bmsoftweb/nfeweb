@@ -75,6 +75,9 @@ São dois roteiros, sem rede e sem banco:
 - `server/nfe/autoteste-emissao.ts` — gera um certificado de teste, monta uma NF-e,
   confere a ordem dos grupos do schema, assina, valida a assinatura, adultera o XML
   para provar que a validação recusa, imprime o DANFE e gera uma NFC-e com QR-Code.
+  Depois passa o XML **real** de cada tipo pelos schemas oficiais: NF-e, NFC-e,
+  cancelamento, carta de correção, duas manifestações e inutilização — e prova que
+  NCM inválido, grupo fora de ordem e protocolo curto são barrados.
 
 ## De onde veio cada tela
 
@@ -132,12 +135,52 @@ src/                      React: Sidebar, Header, painel de respostas e as telas
   o XML assinado dentro dela abertos a interceptação. Para uma UF que exija outra raiz,
   basta jogar o `.crt` nessa pasta.
 
+### Validação contra os schemas (XSD)
+
+Nada vai para a SEFAZ sem passar pelos XSD oficiais de `recursos/Schemas`
+([`server/nfe/validacao.ts`](server/nfe/validacao.ts)). O validador é o `xmllint` da
+libxml2 compilado para WebAssembly (`xmllint-wasm`): roda dentro do Node, sem binário
+nativo nem programa externo, e funciona na Vercel. É o mesmo motor que o ACBr usa por
+baixo do `SSL.Validar`. Custa uns 200 ms por documento.
+
+O comportamento segue o ACBr:
+
+- a validação **sempre** roda e, se falhar, o envio é **barrado** — na geração (a nota
+  nem é gravada), na transmissão (cobre também XML importado), nos eventos e na
+  inutilização;
+- **"Exibir erro de schema"** (Configurações › Geral) só decide o que a tela mostra:
+  ligado, a lista campo a campo; desligado, só o aviso curto ("Falha na validação dos
+  dados da nota: 123"), e o detalhe nem sai do servidor;
+- **evento** é validado em duas etapas, como no `TNFeEnvEvento`: o lote `<envEvento>`
+  contra `envEvento_v1.00.xsd` e o `<detEvento>` contra o schema do código dele
+  (`e110111_v1.00.xsd` para cancelamento, `e110110` para carta de correção etc.).
+
+Cada `.xsd` é lido junto com tudo o que ele inclui ou importa, recursivamente — o
+`xmllint` roda num sistema de arquivos em memória e não enxerga o que não for
+pré-carregado. As mensagens do `xmllint` saem traduzidas nos casos comuns (formato,
+tamanho, ordem, elemento faltando, valor fora da lista).
+
+O botão **Validar XML** da lista de documentos confere uma nota contra o schema sem
+enviar nada, como no exemplo Delphi.
+
+Na Vercel o `xmllint-wasm` sobe um *worker* e carrega o `.wasm` por caminho montado
+em tempo de execução — o rastreador de arquivos não enxerga isso, por isso o pacote
+está no `includeFiles` do `vercel.json`, ao lado de `recursos/**`.
+
+### Onde ficam os arquivos
+
+Nada é gravado em disco: o XML assinado, o XML com protocolo, os eventos, as
+inutilizações, os documentos da Distribuição DF-e e o próprio `.pfx` ficam todos no
+MySQL, e o DANFE é gerado a cada pedido em vez de ser guardado. É o que permite rodar
+em serverless, onde o sistema de arquivos é somente leitura fora de `/tmp` — e `/tmp`
+some a cada invocação.
+
+Por consequência, a aba **Configurações › Arquivos** (pastas, criar pastas mensalmente,
+separar por CNPJ etc.) existe porque o formulário Delphi tinha, e as opções são
+gravadas, mas ainda não têm efeito: não há gravação em disco para configurar.
+
 ### O que ainda não está aqui
 
-- **Validação contra os XSD** antes de transmitir. Os schemas estão em
-  `recursos/Schemas`, mas não existe validador XSD em JavaScript puro — todos os que
-  há dependem de binário nativo ou de Java. Por ora a rejeição vem da própria SEFAZ,
-  com o código e o motivo no painel de respostas.
 - **Grupos raros do layout**: exportação, comércio exterior, combustíveis, ISSQN,
   cana, ICMS UF de destino (DIFAL) e os eventos da Reforma Tributária.
 - **Impressão em impressora térmica (EscPos)**: o DANFE NFC-e sai em PDF de bobina,

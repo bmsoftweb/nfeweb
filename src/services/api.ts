@@ -1,5 +1,6 @@
 import {
-  CertificadoInfo, ConfigNFe, DocumentoLista, Emitente, Meta, Painel, Retorno, StatusBanco, Usuario,
+  CertificadoInfo, ConfigNFe, DocumentoLista, Emitente, ErroApi, Meta, Painel, ResultadoValidacao,
+  Retorno, StatusBanco, Usuario,
 } from '../types';
 
 let empresaId: number | null = null;
@@ -25,7 +26,15 @@ async function pedir<T>(rota: string, opcoes: RequestInit = {}): Promise<T> {
     corpo = { error: texto };
   }
 
-  if (!resposta.ok) throw new Error(corpo?.error || `Falha na requisição (${resposta.status}).`);
+  if (!resposta.ok) {
+    const erro: ErroApi = new Error(corpo?.error || `Falha na requisição (${resposta.status}).`);
+    // Falha de schema (422) traz a lista campo a campo para a tela mostrar
+    if (corpo?.errosSchema) {
+      erro.errosSchema = corpo.errosSchema;
+      erro.schema = corpo.schema;
+    }
+    throw erro;
+  }
   return corpo as T;
 }
 
@@ -82,6 +91,10 @@ export const importarXml = (xml: string) => post<{ success: boolean; chave: stri
 
 export const validarAssinatura = (xml: string) =>
   post<{ valida: boolean; erro?: string }>('/validar-assinatura', { xml });
+
+/** Confere o documento contra o XSD oficial sem enviar nada à SEFAZ */
+export const validarXml = (dados: { chave?: string; xml?: string }) =>
+  post<ResultadoValidacao>('/validar-xml', dados);
 
 export const enviarEvento = (dados: {
   chave: string; tipoEvento: string; sequencia?: number;

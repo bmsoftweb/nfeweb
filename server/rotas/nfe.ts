@@ -17,6 +17,7 @@ import { UFS } from '../nfe/servicos.js';
 import { chaveValida } from '../nfe/chave.js';
 import { dataHoraMysql, paraBR } from '../nfe/datas.js';
 import { recortarElemento, semDeclaracao, valorTag } from '../nfe/xml.js';
+import { FalhaSchema, exigirValido, validarNFe, validarQualquer } from '../nfe/validacao.js';
 import {
   autorizar,
   consultarCadastro,
@@ -35,15 +36,25 @@ function empresaDaRequisicao(req: Request): number {
   return id;
 }
 
-/** Envolve o handler para que toda exceção vire um 400 com a mensagem em português */
+/**
+ * Envolve o handler para que toda exceção vire um 400 com a mensagem em português.
+ * Falha de schema sai como 422 e leva a lista de erros, para a tela mostrar campo a campo.
+ */
 function rota(handler: (req: Request, res: Response) => Promise<any>) {
   return async (req: Request, res: Response) => {
     try {
       await handler(req, res);
     } catch (err: any) {
-      if (!res.headersSent) {
-        res.status(400).json({ success: false, error: err?.message || String(err) });
+      if (res.headersSent) return;
+      if (err instanceof FalhaSchema) {
+        res.status(422).json(
+          err.detalhar
+            ? { success: false, error: err.aviso, errosSchema: err.erros, schema: err.schema }
+            : { success: false, error: err.aviso },
+        );
+        return;
       }
+      res.status(400).json({ success: false, error: err?.message || String(err) });
     }
   };
 }
@@ -211,6 +222,13 @@ export function criarRotasNFe(): Router {
     const assinada = assinar(semDeclaracao(gerada.xml), 'infNFe', `NFe${gerada.chave}`, ctx.certificado);
     const xml = `<?xml version="1.0" encoding="UTF-8"?>${assinada}`;
 
+    // Nota fora do schema nem chega a ser gravada: o usuário corrige o formulário
+    exigirValido(
+      await validarNFe(xml),
+      `Falha na validação dos dados da nota: ${gerada.numero}`,
+      ctx.config.geral.exibirErroSchema,
+    );
+
     const dest = documento.destinatario;
     await pool.query(
       `INSERT INTO nfe_documentos
@@ -300,6 +318,27 @@ export function criarRotasNFe(): Router {
 
   r.post('/validar-assinatura', rota(async (req, res) => {
     res.json(conferirAssinatura(String(req.body?.xml || '')));
+  }));
+
+  /**
+   * Botão "Validar XML": confere o documento contra o schema sem enviar nada.
+   * Aceita o XML direto ou a chave de um documento já guardado. Resultado
+   * inválido não é erro da requisição — volta 200 com a lista de problemas.
+   */
+  r.post('/validar-xml', rota(async (req, res) => {
+    const empresaId = empresaDaRequisicao(req);
+
+    let xml: string = req.body?.xml || '';
+    if (!xml && req.body?.chave) {
+      const [linhas] = await pool.query<any[]>(
+        'SELECT xml, xml_protocolo FROM nfe_documentos WHERE empresa_id = ? AND chave = ? LIMIT 1',
+        [empresaId, req.body.chave],
+      );
+      xml = linhas[0]?.xml_protocolo || linhas[0]?.xml || '';
+    }
+    if (!xml) throw new Error('Informe o XML ou a chave de um documento já gerado.');
+
+    res.json(await validarQualquer(xml));
   }));
 
   // =========================================================================

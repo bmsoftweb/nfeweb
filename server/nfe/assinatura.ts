@@ -6,8 +6,10 @@
  * 1.0 inclusiva. SHA-256 até existe no componente, mas a SEFAZ continua
  * validando a NF-e com SHA-1 — trocar rejeita o documento.
  *
- * A assinatura entra como irmã do elemento assinado (enveloped), logo depois
- * dele: <NFe><infNFe Id="NFe..."/>...<Signature/></NFe>.
+ * A assinatura entra como ÚLTIMO filho do elemento que contém o assinado
+ * (enveloped). "Logo depois do assinado" não serve: na NFC-e o schema exige
+ * <NFe><infNFe/><infNFeSupl/><Signature/></NFe>, e a assinatura colada em
+ * </infNFe> ficaria antes do infNFeSupl — rejeição 225 em toda NFC-e.
  */
 import { SignedXml } from 'xml-crypto';
 
@@ -49,7 +51,7 @@ export function assinar(
   // A SEFAZ espera <Signature> sem prefixo e com o namespace declarado nele mesmo
   sig.computeSignature(xml, {
     prefix: '',
-    location: { reference: `//*[local-name(.)='${elemento}']`, action: 'after' },
+    location: { reference: `//*[local-name(.)='${elemento}']/..`, action: 'append' },
   });
 
   return sig.getSignedXml();

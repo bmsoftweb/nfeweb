@@ -342,6 +342,22 @@ export function gerarNFe(ctx: Contexto, doc: DocumentoNFe): NFeGerada {
   const homologacao = ambiente === 2;
   const dest = doc.destinatario;
 
+  // Indicadores calculados uma vez só: a regra abaixo e o XML usam os mesmos valores
+  const idDest = doc.ide.idDestino ?? 1;
+  const indFinal = doc.ide.consumidorFinal ?? (nfce ? 1 : 0);
+  const indIEDest = dest ? dest.indIEDest ?? (dest.inscricaoEstadual ? 1 : 9) : undefined;
+
+  // Rejeição 696 (MOC 4.00): não contribuinte, fora de operação com o exterior, é
+  // sempre consumidor final. O ACBr não confere essa regra; a SEFAZ confere, e a nota
+  // voltava rejeitada. Não corrigimos sozinhos porque é dado fiscal escolhido por quem
+  // emite — a mensagem diz o que mudar.
+  if (indIEDest === 9 && idDest !== 3 && indFinal !== 1) {
+    throw new Error(
+      'Destinatário não contribuinte (indicador de IE = 9) exige "Consumidor final = Sim" ' +
+        '(rejeição 696 da SEFAZ). A exceção é a operação com o exterior.',
+    );
+  }
+
   // ----- ide -----
   const ide = grupoObrigatorio('ide',
     tag('cUF', CODIGO_UF[emit.uf.toUpperCase()]),
@@ -353,14 +369,14 @@ export function gerarNFe(ctx: Contexto, doc: DocumentoNFe): NFeGerada {
     tag('dhEmi', dataHoraDFe(emissao)),
     doc.ide.dataSaida ? tag('dhSaiEnt', dataHoraDFe(new Date(doc.ide.dataSaida))) : '',
     tag('tpNF', doc.ide.tipoDocumento),
-    tag('idDest', doc.ide.idDestino ?? 1),
+    tag('idDest', idDest),
     tag('cMunFG', doc.ide.codigoMunicipioFG || emit.codigo_municipio),
     tag('tpImp', nfce ? 4 : cfg.danfe.tipoDanfe === 1 ? 2 : 1),
     tag('tpEmis', tipoEmissao),
     tag('cDV', chave.slice(-1)),
     tag('tpAmb', ambiente),
     tag('finNFe', doc.ide.finalidade ?? 1),
-    tag('indFinal', doc.ide.consumidorFinal ?? (nfce ? 1 : 0)),
+    tag('indFinal', indFinal),
     tag('indPres', doc.ide.presencial ?? (nfce ? 1 : 0)),
     tag('procEmi', 0),
     tag('verProc', 'nfeWeb 0.1.0'),
@@ -417,8 +433,8 @@ export function gerarNFe(ctx: Contexto, doc: DocumentoNFe): NFeGerada {
             tag('fone', (e.fone || '').replace(/\D/g, '')),
           )
         : '',
-      tag('indIEDest', dest.indIEDest ?? (dest.inscricaoEstadual ? 1 : 9)),
-      dest.indIEDest === 1 ? tag('IE', (dest.inscricaoEstadual || '').replace(/\D/g, '')) : '',
+      tag('indIEDest', indIEDest),
+      indIEDest === 1 ? tag('IE', (dest.inscricaoEstadual || '').replace(/\D/g, '')) : '',
       tag('ISUF', dest.suframa),
       tag('email', dest.email),
     );

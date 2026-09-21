@@ -8,7 +8,7 @@ import { formatarDataHora } from '../utils/formatters';
 
 /** Aba "Inutilização": inutiliza uma faixa de numeração que não será usada */
 export const InutilizacaoView: React.FC<{ meta: Meta | null; modeloPadrao: string }> = ({ meta, modeloPadrao }) => {
-  const { retorno, erro, carregando, executar } = useOperacao();
+  const { retorno, erro, errosSchema, carregando, executar } = useOperacao();
 
   const [ano, setAno] = useState(new Date().getFullYear());
   const [modelo, setModelo] = useState(modeloPadrao);
@@ -124,6 +124,7 @@ export const InutilizacaoView: React.FC<{ meta: Meta | null; modeloPadrao: strin
       <PainelRespostas
         retorno={retorno}
         erro={erro}
+        errosSchema={errosSchema}
         carregando={carregando}
         resumo={[
           ['Protocolo', retorno?.dados?.protocolo],

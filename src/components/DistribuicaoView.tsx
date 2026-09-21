@@ -11,7 +11,7 @@ import { formatarChave, formatarDataHora, formatarMoeda } from '../utils/formatt
  * empresa é destinatária, e manifesta-se sobre eles.
  */
 export const DistribuicaoView: React.FC<{ meta: Meta | null }> = ({ meta }) => {
-  const { retorno, erro, carregando, executar } = useOperacao();
+  const { retorno, erro, errosSchema, carregando, executar } = useOperacao();
 
   const [modo, setModo] = useState<'ultNSU' | 'nsu' | 'chave'>('ultNSU');
   const [valor, setValor] = useState('0');
@@ -82,6 +82,7 @@ export const DistribuicaoView: React.FC<{ meta: Meta | null }> = ({ meta }) => {
       <PainelRespostas
         retorno={retorno}
         erro={erro}
+        errosSchema={errosSchema}
         carregando={carregando}
         resumo={[
           ['Último NSU', retorno?.dados?.ultNSU],

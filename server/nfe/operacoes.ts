@@ -22,6 +22,7 @@ import { DECLARACAO, NS_NFE, lerXml, limparTexto, recortarElemento, semDeclaraca
 import { dataHoraDFe, agora } from './datas.js';
 import { acharTipoEvento, COND_USO_CCE } from './eventos.js';
 import { chaveValida, lerChave } from './chave.js';
+import { exigirValido, validarEvento, validarInutilizacao, validarNFe } from './validacao.js';
 
 export interface Retorno {
   sucesso: boolean;
@@ -227,7 +228,8 @@ export interface PedidoInutilizacao {
   justificativa: string;
 }
 
-export async function inutilizar(ctx: Contexto, p: PedidoInutilizacao): Promise<Retorno> {
+/** Monta e assina o <inutNFe>, sem transmitir. Separado para o autoteste validar o XML real. */
+export function montarInutilizacao(ctx: Contexto, p: PedidoInutilizacao): { id: string; assinado: string } {
   const justificativa = limparTexto(p.justificativa);
   if (justificativa.length < 15) {
     throw new Error('A justificativa da inutilização precisa ter ao menos 15 caracteres.');
@@ -262,7 +264,18 @@ export async function inutilizar(ctx: Contexto, p: PedidoInutilizacao): Promise<
     tag('xJust', justificativa) +
     '</infInut></inutNFe>';
 
-  const assinado = assinar(corpo, 'infInut', id, ctx.certificado);
+  return { id, assinado: assinar(corpo, 'infInut', id, ctx.certificado) };
+}
+
+export async function inutilizar(ctx: Contexto, p: PedidoInutilizacao): Promise<Retorno> {
+  const { id, assinado } = montarInutilizacao(ctx, p);
+
+  exigirValido(
+    await validarInutilizacao(assinado),
+    'Falha na validação dos dados da inutilização.',
+    ctx.config.geral.exibirErroSchema,
+  );
+
   const ret = await transmitir(ctx, 'inutilizar', 'NfeInutilizacao', assinado);
 
   ret.dados = {
@@ -322,7 +335,8 @@ function montarDetEvento(tipo: ReturnType<typeof acharTipoEvento>, p: PedidoEven
   return `<detEvento versao="1.00">${partes.join('')}</detEvento>`;
 }
 
-export async function enviarEvento(ctx: Contexto, p: PedidoEvento): Promise<Retorno> {
+/** Monta e assina o lote <envEvento>, sem transmitir. Separado para o autoteste validar o XML real. */
+export function montarEvento(ctx: Contexto, p: PedidoEvento) {
   const chave = p.chave.replace(/\D/g, '');
   if (!chaveValida(chave)) throw new Error('Chave de acesso inválida.');
 
@@ -352,6 +366,18 @@ export async function enviarEvento(ctx: Contexto, p: PedidoEvento): Promise<Reto
     tag('idLote', '1') +
     semDeclaracao(eventoAssinado).replace(` xmlns="${NS_NFE}"`, '') +
     '</envEvento>';
+
+  return { chave, tipo, sequencia, id, cOrgao, eventoAssinado, mensagem };
+}
+
+export async function enviarEvento(ctx: Contexto, p: PedidoEvento): Promise<Retorno> {
+  const { chave, tipo, sequencia, id, cOrgao, eventoAssinado, mensagem } = montarEvento(ctx, p);
+
+  exigirValido(
+    await validarEvento(mensagem, tipo.codigo),
+    `Falha na validação dos dados do evento (${tipo.descricao}).`,
+    ctx.config.geral.exibirErroSchema,
+  );
 
   const ret = await transmitir(ctx, `evento_${tipo.codigo}`, 'RecepcaoEvento', mensagem, {
     chave,
@@ -398,6 +424,13 @@ export async function autorizar(
 ): Promise<Retorno> {
   const sincrono = opcoes.sincrono !== false;
   const chave = (xmlNFe.match(/Id="NFe(\d{44})"/) || [])[1];
+
+  // Também cobre XML importado ou editado fora do sistema: nada sai sem passar no schema
+  exigirValido(
+    await validarNFe(xmlNFe),
+    `Falha na validação dos dados da nota: ${Number(valorTag(xmlNFe, 'nNF')) || ''}`.trim(),
+    ctx.config.geral.exibirErroSchema,
+  );
 
   const mensagem =
     `<enviNFe versao="${VERSAO_LAYOUT}" xmlns="${NS_NFE}">` +
