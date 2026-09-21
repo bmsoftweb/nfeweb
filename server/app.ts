@@ -2,7 +2,7 @@ import 'dotenv/config';
 import express, { Request, Response } from 'express';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
-import { pool, checkDbHealth } from './db.js';
+import { pool, checkDbHealth, CONFIG_FALTANDO, MENSAGEM_CONFIG_FALTANDO } from './db.js';
 import { criarRotasNFe } from './rotas/nfe.js';
 import { carregarCertificado } from './nfe/contexto.js';
 import { lerConfig } from './config.js';
@@ -40,6 +40,16 @@ export function createApp() {
   const app = express();
   // O .pfx e os XMLs em base64 passam do limite padrão de 100kb
   app.use(express.json({ limit: '25mb' }));
+
+  // Sem as variáveis de conexão nenhuma rota tem como funcionar: melhor dizer o
+  // que falta do que deixar o mysql2 tentar 127.0.0.1 e devolver ECONNREFUSED.
+  // A saúde do banco escapa da regra, porque é justamente quem relata o problema.
+  if (CONFIG_FALTANDO.length) {
+    app.use('/api', (req: Request, res: Response, proximo) => {
+      if (req.path === '/db/status') return proximo();
+      res.status(503).json({ success: false, error: MENSAGEM_CONFIG_FALTANDO });
+    });
+  }
 
   // =========================================================================
   // Autenticação: CNPJ do emitente + usuário + senha

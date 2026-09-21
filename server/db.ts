@@ -16,6 +16,22 @@ const dbConfig: mysql.PoolOptions = {
 
 export const pool = mysql.createPool(dbConfig);
 
+/**
+ * Variáveis de conexão que não foram definidas.
+ *
+ * Sem elas o mysql2 cai nos padrões e tenta 127.0.0.1 — que em deploy
+ * serverless é o próprio contêiner, e o erro que chega na tela é um
+ * ECONNREFUSED sem pista nenhuma da causa real.
+ */
+export const CONFIG_FALTANDO = ['MYSQL_HOST', 'MYSQL_USER', 'MYSQL_DATABASE'].filter(
+  (nome) => !process.env[nome],
+);
+
+export const MENSAGEM_CONFIG_FALTANDO =
+  `Banco de dados não configurado: falta definir ${CONFIG_FALTANDO.join(', ')}. ` +
+  'Em execução local isso vem do arquivo .env; na Vercel, de Settings › Environment ' +
+  'Variables (e o deploy precisa ser refeito depois de definí-las).';
+
 /** Tabelas criadas pelo extras/nfeweb_schema.sql */
 export const DB_TABLES = [
   'nfe_empresas',
@@ -31,6 +47,22 @@ export const DB_TABLES = [
 
 export async function checkDbHealth() {
   const inicio = Date.now();
+
+  if (CONFIG_FALTANDO.length) {
+    return {
+      connected: false,
+      latencyMs: 0,
+      error: MENSAGEM_CONFIG_FALTANDO,
+      code: 'CONFIG_AUSENTE',
+      host: dbConfig.host,
+      port: dbConfig.port,
+      user: dbConfig.user,
+      database: dbConfig.database,
+      tableCounts: {},
+      tabelasFaltando: DB_TABLES,
+    };
+  }
+
   try {
     const conn = await pool.getConnection();
     const [verRows] = await conn.query<any[]>('SELECT VERSION() as version, DATABASE() as db');
