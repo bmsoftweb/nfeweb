@@ -17,6 +17,11 @@ export interface ConfigGeral {
   csc: string;
   idCSRT: string;
   csrt: string;
+  /** Responsável técnico (infRespTec): a software house, não o emitente */
+  respTecCNPJ: string;
+  respTecContato: string;
+  respTecEmail: string;
+  respTecFone: string;
   versaoQRCode: number;
   atualizarXML: boolean;
   exibirErroSchema: boolean;
@@ -95,6 +100,10 @@ export const CONFIG_PADRAO: ConfigNFe = {
     csc: '',
     idCSRT: '',
     csrt: '',
+    respTecCNPJ: '',
+    respTecContato: '',
+    respTecEmail: '',
+    respTecFone: '',
     versaoQRCode: 2,
     atualizarXML: true,
     exibirErroSchema: true,

@@ -629,6 +629,18 @@ export function criarRotasNFe(): Router {
     direcaoPadrao: 'desc',
   }));
 
+  /** Sugestão para a Nova NF-e: o maior número já usado na série (mesmo modelo e ambiente) + 1 */
+  r.get('/proximo-numero', rota(async (req, res) => {
+    const empresaId = empresaDaRequisicao(req);
+    const config = await lerConfig(empresaId);
+    const [linhas] = await pool.query<any[]>(
+      `SELECT COALESCE(MAX(numero), 0) + 1 AS proximo FROM nfe_documentos
+        WHERE empresa_id = ? AND modelo = ? AND serie = ? AND ambiente = ?`,
+      [empresaId, config.geral.modeloDF, Number(req.query.serie) || 1, config.webservice.ambiente],
+    );
+    res.json({ numero: Number(linhas[0].proximo) });
+  }));
+
   r.get('/documentos/:chave', rota(async (req, res) => {
     const empresaId = empresaDaRequisicao(req);
     if (!chaveValida(req.params.chave)) throw new Error('Chave de acesso inválida.');

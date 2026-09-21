@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ArrowLeft, Plus, Save, Send, Trash2 } from 'lucide-react';
 import * as api from '../services/api';
 import { Meta } from '../types';
@@ -172,6 +172,12 @@ export const NovaNFeView: React.FC<{
   const [modalidadeFrete, setModalidadeFrete] = useState(inicial.modalidadeFrete);
   const [formaPagamento, setFormaPagamento] = useState(inicial.formaPagamento);
   const [observacoes, setObservacoes] = useState(inicial.observacoes);
+
+  // Nota nova ou cópia: sugere o próximo número da série (o usuário pode trocar)
+  useEffect(() => {
+    if (edicao || numero) return;
+    api.proximoNumero(serie).then((r) => setNumero((atual) => atual || String(r.numero))).catch(() => {});
+  }, [serie]);
 
   const [chaveGerada, setChaveGerada] = useState('');
   const [confirmandoEnvio, setConfirmandoEnvio] = useState(false);

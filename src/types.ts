@@ -34,6 +34,10 @@ export interface ConfigNFe {
     csc: string;
     idCSRT: string;
     csrt: string;
+    respTecCNPJ: string;
+    respTecContato: string;
+    respTecEmail: string;
+    respTecFone: string;
     versaoQRCode: number;
     atualizarXML: boolean;
     exibirErroSchema: boolean;

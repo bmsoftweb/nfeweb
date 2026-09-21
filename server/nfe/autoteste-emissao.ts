@@ -241,6 +241,20 @@ async function principal() {
     assert.ok(r.valido, semErros(r));
   });
 
+  await conferir('responsável técnico da configuração entra no XML e passa no schema', async () => {
+    const ctxRt = contexto('55');
+    ctxRt.config.geral = {
+      ...ctxRt.config.geral,
+      respTecCNPJ: '11.222.333/0001-81', respTecContato: 'SUPORTE', respTecEmail: 'suporte@teste.com.br',
+      respTecFone: '(11) 3333-4444', idCSRT: '01', csrt: 'CSRT-DE-TESTE',
+    };
+    const nota = gerarNFe(ctxRt, documento as any);
+    assert.ok(nota.xml.includes('<infRespTec><CNPJ>11222333000181</CNPJ>'), 'faltou o infRespTec');
+    assert.ok(nota.xml.includes('<hashCSRT>'), 'faltou o hashCSRT');
+    const r = await validarNFe(assinar(semDeclaracao(nota.xml), 'infNFe', `NFe${nota.chave}`, ctxRt.certificado));
+    assert.ok(r.valido, semErros(r));
+  });
+
   await conferir('NCM inválido é barrado, apontando o campo', async () => {
     const r = await validarNFe(assinado.replace('<NCM>84713012</NCM>', '<NCM>8471301</NCM>'));
     assert.ok(!r.valido, 'NCM com 7 dígitos não podia passar');

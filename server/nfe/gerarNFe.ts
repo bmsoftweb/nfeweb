@@ -564,7 +564,10 @@ export function gerarNFe(ctx: Contexto, doc: DocumentoNFe): NFeGerada {
     tag('infCpl', limparTexto(doc.informacoesAdicionais?.contribuinte || '', 5000)),
   );
 
-  const rt = doc.responsavelTecnico;
+  const g = ctx.config.geral;
+  const rt = doc.responsavelTecnico ?? (g.respTecCNPJ
+    ? { cnpj: g.respTecCNPJ, contato: g.respTecContato, email: g.respTecEmail, fone: g.respTecFone, idCSRT: g.idCSRT, csrt: g.csrt }
+    : undefined);
   const infRespTec = rt
     ? grupoObrigatorio('infRespTec',
         tag('CNPJ', rt.cnpj.replace(/\D/g, '')),

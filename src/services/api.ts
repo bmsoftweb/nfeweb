@@ -182,6 +182,8 @@ const paraQuery = (c: ConsultaGrade) =>
 
 export const listarDocumentos = (c: ConsultaGrade) =>
   pedir<PaginaGrade<DocumentoLista>>(`/documentos?${paraQuery(c)}`);
+/** Próximo número livre da série, para já abrir a Nova NF-e numerada */
+export const proximoNumero = (serie: string) => pedir<{ numero: number }>(`/proximo-numero?serie=${encodeURIComponent(serie)}`);
 export const buscarDocumento = (chave: string) => pedir<any>(`/documentos/${chave}`);
 export const listarEventos = () => pedir<any[]>('/eventos');
 export const listarInutilizacoes = () => pedir<any[]>('/inutilizacoes');

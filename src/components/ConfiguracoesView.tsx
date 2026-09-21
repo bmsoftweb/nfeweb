@@ -293,6 +293,31 @@ export const ConfiguracoesView: React.FC<{
               className="lg:col-span-3"
             />
 
+            <Texto
+              rotulo="CNPJ do responsável técnico"
+              value={config.geral.respTecCNPJ}
+              onChange={(e) => alterar('geral', 'respTecCNPJ', e.target.value)}
+              className="lg:col-span-3"
+            />
+            <Texto
+              rotulo="Contato do responsável técnico"
+              value={config.geral.respTecContato}
+              onChange={(e) => alterar('geral', 'respTecContato', e.target.value)}
+              className="lg:col-span-3"
+            />
+            <Texto
+              rotulo="E-mail do responsável técnico"
+              value={config.geral.respTecEmail}
+              onChange={(e) => alterar('geral', 'respTecEmail', e.target.value)}
+              className="lg:col-span-3"
+            />
+            <Texto
+              rotulo="Telefone do responsável técnico"
+              value={config.geral.respTecFone}
+              onChange={(e) => alterar('geral', 'respTecFone', e.target.value)}
+              className="lg:col-span-3"
+            />
+
             <div className="lg:col-span-12 grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
               <Toggle
                 checked={config.geral.atualizarXML}
