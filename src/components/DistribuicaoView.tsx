@@ -40,7 +40,7 @@ export const DistribuicaoView: React.FC<{ meta: Meta | null }> = ({ meta }) => {
   const eventosManifestacao = (meta?.tiposEvento || []).filter((t) => t.grupo === 'manifestacao');
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col">
       <Secao
         titulo="Distribuição DF-e"
         descricao="Documentos emitidos contra o CNPJ do emitente, no Ambiente Nacional"
@@ -66,7 +66,7 @@ export const DistribuicaoView: React.FC<{ meta: Meta | null }> = ({ meta }) => {
             inputMode="numeric"
             value={valor}
             onChange={(e) => setValor(e.target.value.replace(/\D/g, '').slice(0, modo === 'chave' ? 44 : 15))}
-            className="flex-1 min-w-[260px] font-mono"
+            className="flex-1 min-w-[260px]"
           />
           <Botao
             variante="primario"

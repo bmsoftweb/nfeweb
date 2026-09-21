@@ -3,16 +3,31 @@ import {
   Retorno, StatusBanco, Usuario,
 } from '../types';
 
-let empresaId: number | null = null;
+/**
+ * Token de sessão devolvido pelo login. Vai em toda requisição no header
+ * Authorization; é dele que o servidor tira a empresa.
+ */
+let token: string | null = null;
+let aoExpirar: ((mensagem: string) => void) | null = null;
 
-export function definirEmpresa(id: number | null) {
-  empresaId = id;
+export function definirToken(novo: string | null) {
+  token = novo;
+}
+
+/** Chamado quando o servidor recusa a sessão (401), para voltar ao login */
+export function aoExpirarSessao(callback: (mensagem: string) => void) {
+  aoExpirar = callback;
 }
 
 function cabecalhos(): HeadersInit {
   const h: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (empresaId) h['x-empresa-id'] = String(empresaId);
+  if (token) h.Authorization = `Bearer ${token}`;
   return h;
+}
+
+/** 401 com sessão aberta significa token vencido ou acesso revogado: volta ao login */
+function conferirSessao(status: number, mensagem: string) {
+  if (status === 401 && token && aoExpirar) aoExpirar(mensagem);
 }
 
 async function pedir<T>(rota: string, opcoes: RequestInit = {}): Promise<T> {
@@ -27,6 +42,7 @@ async function pedir<T>(rota: string, opcoes: RequestInit = {}): Promise<T> {
   }
 
   if (!resposta.ok) {
+    conferirSessao(resposta.status, corpo?.error || 'Sessão expirada. Entre novamente.');
     const erro: ErroApi = new Error(corpo?.error || `Falha na requisição (${resposta.status}).`);
     // Falha de schema (422) traz a lista campo a campo para a tela mostrar
     if (corpo?.errosSchema) {
@@ -46,7 +62,7 @@ const post = <T>(rota: string, corpo?: any) =>
 // ---------------------------------------------------------------------------
 
 export const entrar = (cnpj: string, usuario: string, senha: string) =>
-  post<{ success: boolean; usuario: Usuario; empresa: Emitente }>('/login', { cnpj, usuario, senha });
+  post<{ success: boolean; token: string; usuario: Usuario; empresa: Emitente }>('/login', { cnpj, usuario, senha });
 
 export const buscarMeta = () => pedir<Meta>('/meta');
 export const buscarPainel = () => pedir<Painel>('/painel');
@@ -81,8 +97,9 @@ export const consultarRecibo = (recibo: string) => post<Retorno>('/consultar-rec
 export const consultarCadastro = (dados: { uf: string; cnpj?: string; cpf?: string; ie?: string }) =>
   post<Retorno>('/consultar-cadastro', dados);
 
-export const gerarNFe = (documento: any) =>
-  post<{ success: boolean; chave: string; totais: any; xml: string }>('/gerar', { documento });
+/** Com `documentoId`, regrava a nota existente (edição de assinada ou rejeitada) em vez de criar outra */
+export const gerarNFe = (documento: any, documentoId?: number) =>
+  post<{ success: boolean; chave: string; totais: any; xml: string }>('/gerar', { documento, documentoId });
 
 export const enviarNFe = (dados: { chave?: string; xml?: string; sincrono?: boolean }) =>
   post<Retorno>('/enviar', dados);
@@ -125,6 +142,7 @@ export async function abrirDanfe(chave: string) {
 
   if (!resposta.ok) {
     const erro = await resposta.json().catch(() => ({ error: 'Falha ao gerar o DANFE.' }));
+    conferirSessao(resposta.status, erro.error);
     throw new Error(erro.error);
   }
 
@@ -138,10 +156,44 @@ export async function abrirDanfe(chave: string) {
 // Listagens
 // ---------------------------------------------------------------------------
 
-export const listarDocumentos = () => pedir<DocumentoLista[]>('/documentos');
+/** Parâmetros das grades paginadas no servidor (padrão b2b admin) */
+export interface ConsultaGrade {
+  pagina: number;
+  porPagina: number;
+  busca: string;
+  ordem: string;
+  direcao: 'asc' | 'desc';
+}
+
+export interface PaginaGrade<T> {
+  data: T[];
+  total: number;
+  totalPages: number;
+}
+
+const paraQuery = (c: ConsultaGrade) =>
+  new URLSearchParams({
+    pagina: String(c.pagina),
+    porPagina: String(c.porPagina),
+    busca: c.busca,
+    ordem: c.ordem,
+    direcao: c.direcao,
+  }).toString();
+
+export const listarDocumentos = (c: ConsultaGrade) =>
+  pedir<PaginaGrade<DocumentoLista>>(`/documentos?${paraQuery(c)}`);
 export const buscarDocumento = (chave: string) => pedir<any>(`/documentos/${chave}`);
 export const listarEventos = () => pedir<any[]>('/eventos');
 export const listarInutilizacoes = () => pedir<any[]>('/inutilizacoes');
 export const listarDistribuicao = () => pedir<any[]>('/distribuicao');
-export const listarLog = () => pedir<any[]>('/log');
+export const listarLog = (c: ConsultaGrade) => pedir<PaginaGrade<any>>(`/log?${paraQuery(c)}`);
+
+// ---------------------------------------------------------------------------
+// Preferências das grades
+// ---------------------------------------------------------------------------
+
+export const buscarConfigListas = () => pedir<Record<string, unknown>>('/config-listas');
+
+export const gravarConfigListas = (config: Record<string, unknown>) =>
+  pedir<{ success: boolean }>('/config-listas', { method: 'PUT', body: JSON.stringify(config) });
 export const buscarLog = (id: number) => pedir<any>(`/log/${id}`);

@@ -10,7 +10,8 @@ import { chaveValida, cnpjValido, cpfValido, digitoChave, lerChave, montarChave 
 import { resolverDistribuicaoDFe, resolverServico, ufPorCodigo } from './servicos.js';
 import { grupo, limparTexto, num, tag } from './xml.js';
 import { somarTotais } from './gerarNFe.js';
-import { anoMesChave, dataHoraDFe } from './datas.js';
+import { anoMesChave, dataDoDocumento, dataHoraDFe } from './datas.js';
+import { criarToken, lerToken } from '../auth.js';
 
 function conferir(nome: string, fn: () => void) {
   fn();
@@ -123,9 +124,55 @@ conferir('construtor de XML omite vazios e escapa o conteúdo', () => {
   assert.strictEqual(limparTexto('  Ação   com\nacento  '), 'Acao com acento');
 });
 
+conferir('data do formulário não muda de dia nem de mês, em qualquer fuso do servidor', () => {
+  // new Date("2026-09-20") é meia-noite UTC: em São Paulo virava 21h do dia 19
+  assert.ok(dataHoraDFe(dataDoDocumento('2026-09-20')).startsWith('2026-09-20T'), 'o dia foi alterado');
+  // No dia 1º o erro ainda trocava o mês da chave de acesso
+  assert.strictEqual(anoMesChave(dataDoDocumento('2026-10-01')), '2610');
+  assert.strictEqual(dataHoraDFe(dataDoDocumento('2026-09-20T14:30')), '2026-09-20T14:30:00-03:00');
+  assert.strictEqual(dataHoraDFe(dataDoDocumento('2026-09-20T17:30:00Z')), '2026-09-20T14:30:00-03:00');
+  assert.strictEqual(dataHoraDFe(dataDoDocumento('2026-09-20T14:30:00-03:00')), '2026-09-20T14:30:00-03:00');
+});
+
 conferir('dhEmi sai no horário de Brasília, com offset explícito', () => {
   const texto = dataHoraDFe(new Date(2026, 8, 20, 22, 15, 30));
   assert.strictEqual(texto, '2026-09-20T22:15:30-03:00');
+});
+
+// --- Sessão ---------------------------------------------------------------
+conferir('token de sessão: vale só inteiro, dentro do prazo e com o segredo certo', () => {
+  const segredoOriginal = process.env.SESSION_SECRET;
+  process.env.SESSION_SECRET = 'segredo-de-teste-com-mais-de-32-caracteres-0123456789';
+  try {
+    const agora = Date.now();
+    const token = criarToken(7, 1, agora);
+    assert.deepStrictEqual(lerToken(token, agora), { uid: 7, emp: 1 });
+
+    // Trocar a empresa no corpo sem refazer a assinatura: era o ataque do x-empresa-id
+    const [corpo, assinatura] = token.split('.');
+    const dados = JSON.parse(Buffer.from(corpo, 'base64url').toString('utf8'));
+    const forjado = `${Buffer.from(JSON.stringify({ ...dados, emp: 2 })).toString('base64url')}.${assinatura}`;
+    assert.strictEqual(lerToken(forjado, agora), null, 'token com empresa trocada não pode valer');
+
+    assert.strictEqual(lerToken(`${corpo}.${assinatura.slice(0, -2)}xx`, agora), null, 'assinatura alterada');
+    assert.strictEqual(lerToken('', agora), null);
+    assert.strictEqual(lerToken('lixo', agora), null);
+
+    // Vence em 12 horas
+    assert.ok(lerToken(token, agora + 11 * 3_600_000), 'ainda devia valer em 11 h');
+    assert.strictEqual(lerToken(token, agora + 13 * 3_600_000), null, 'não pode valer depois de 12 h');
+
+    // Outro servidor, outro segredo: token de um não vale no outro
+    process.env.SESSION_SECRET = 'outro-segredo-com-mais-de-32-caracteres-abcdefghij';
+    assert.strictEqual(lerToken(token, agora), null, 'token assinado com outro segredo');
+
+    // Segredo curto demais é recusado em vez de gerar token fraco
+    process.env.SESSION_SECRET = 'curto';
+    assert.throws(() => criarToken(7, 1), /SESSION_SECRET/);
+  } finally {
+    if (segredoOriginal === undefined) delete process.env.SESSION_SECRET;
+    else process.env.SESSION_SECRET = segredoOriginal;
+  }
 });
 
 // --- Totais ---------------------------------------------------------------

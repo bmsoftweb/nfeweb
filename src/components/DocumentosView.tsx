@@ -1,10 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { FileCheck2, FileInput, FilePlus2, FileText, Mail, Printer, Send, ShieldCheck } from 'lucide-react';
+import React, { useMemo, useRef, useState } from 'react';
+import { CopyPlus, FileCheck2, FileInput, Mail, Pencil, Plus, Printer, Send, ShieldCheck, X } from 'lucide-react';
 import * as api from '../services/api';
 import { DocumentoLista, Meta, ResultadoValidacao } from '../types';
-import { Botao, Confirmacao, Etiqueta, Secao, Texto, Vazio } from './ui';
+import { Botao, Confirmacao, Etiqueta, Faixa, Texto } from './ui';
+import { AcaoGrade, ColunaGrade, Grade } from './Grade';
 import { ListaErrosSchema, PainelRespostas, useOperacao } from './PainelRespostas';
-import { NovaNFeView } from './NovaNFeView';
+import { CopiaNFe, EdicaoNFe, NovaNFeView } from './NovaNFeView';
 import { AMBIENTES, SITUACOES, formatarChave, formatarDataHora, formatarMoeda } from '../utils/formatters';
 
 /**
@@ -17,18 +18,56 @@ export const DocumentosView: React.FC<{ meta: Meta | null; onRecarregarPainel: (
 }) => {
   const { retorno, erro, errosSchema, carregando, executar, setErro, falhar } = useOperacao();
 
-  const [documentos, setDocumentos] = useState<DocumentoLista[]>([]);
   const [selecionado, setSelecionado] = useState<DocumentoLista | null>(null);
+  /** Incrementado para a grade recarregar a página atual depois de uma ação */
+  const [versao, setVersao] = useState(0);
   const [emitindo, setEmitindo] = useState(false);
   const [confirmandoEnvio, setConfirmandoEnvio] = useState<DocumentoLista | null>(null);
   const [emailPara, setEmailPara] = useState('');
   const [enviandoEmail, setEnviandoEmail] = useState<DocumentoLista | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const [resultadoSchema, setResultadoSchema] = useState<{ numero: number; resultado: ResultadoValidacao } | null>(null);
+  const [copiaDe, setCopiaDe] = useState<CopiaNFe | null>(null);
+  const [edicao, setEdicao] = useState<EdicaoNFe | null>(null);
   const arquivoRef = useRef<HTMLInputElement>(null);
 
-  const carregar = () => api.listarDocumentos().then(setDocumentos).catch(() => setDocumentos([]));
-  useEffect(() => { carregar(); }, []);
+  const carregar = () => setVersao((v) => v + 1);
+
+  const podeTransmitir = (d: DocumentoLista) => ['assinada', 'rejeitada'].includes(d.situacao);
+  // Editar exige as mesmas situações e os dados do formulário (XML importado não tem)
+  const podeEditar = (d: DocumentoLista) => podeTransmitir(d) && !!d.copiavel;
+
+  const colunas = useMemo<ColunaGrade<DocumentoLista>[]>(
+    () => [
+      { nome: 'numero', rotulo: 'Número', tipo: 'numero', valor: (d) => d.numero },
+      { nome: 'serie', rotulo: 'Série', tipo: 'numero', valor: (d) => d.serie },
+      { nome: 'data_emissao', rotulo: 'Emissão', tipo: 'data', valor: (d) => formatarDataHora(d.data_emissao) },
+      {
+        nome: 'destinatario_nome',
+        rotulo: 'Destinatário',
+        valor: (d) => d.destinatario_nome || '—',
+        dica: (d) => d.destinatario_nome,
+      },
+      { nome: 'valor_total', rotulo: 'Valor', tipo: 'numero', valor: (d) => formatarMoeda(d.valor_total) },
+      {
+        nome: 'situacao',
+        rotulo: 'Situação',
+        tipo: 'centro',
+        valor: (d) => {
+          const s = SITUACOES[d.situacao] || SITUACOES.rascunho;
+          return <Etiqueta texto={s.rotulo} classe={s.classe} />;
+        },
+      },
+      { nome: 'ambiente', rotulo: 'Ambiente', tipo: 'centro', valor: (d) => AMBIENTES[d.ambiente] },
+      {
+        nome: 'motivo',
+        rotulo: 'Retorno da SEFAZ',
+        valor: (d) => (d.codigo_status ? `${d.codigo_status} — ${d.motivo}` : '—'),
+        dica: (d) => (d.codigo_status ? `${d.codigo_status} — ${d.motivo}` : undefined),
+      },
+    ],
+    [],
+  );
 
   const transmitir = async (doc: DocumentoLista) => {
     setConfirmandoEnvio(null);
@@ -58,6 +97,51 @@ export const DocumentosView: React.FC<{ meta: Meta | null; onRecarregarPainel: (
     } catch (err: any) {
       setErro(err.message);
     }
+  };
+
+  /** "Novo (copiar)": abre a Nova NF-e já preenchida com a nota selecionada */
+  const novoCopiando = async () => {
+    if (!selecionado) return;
+    setErro(null);
+    try {
+      const completo = await api.buscarDocumento(selecionado.chave);
+      const dados = typeof completo.dados === 'string' ? JSON.parse(completo.dados) : completo.dados;
+      if (!dados) {
+        throw new Error('Esta nota veio de um XML importado: não há dados de formulário para copiar.');
+      }
+      setCopiaDe({ numero: selecionado.numero, dados });
+      setEmitindo(true);
+    } catch (err: any) {
+      falhar(err);
+    }
+  };
+
+  /** "Editar": abre a nota assinada ou rejeitada para corrigir e transmitir de novo */
+  const editar = async (doc: DocumentoLista) => {
+    setErro(null);
+    try {
+      const completo = await api.buscarDocumento(doc.chave);
+      const dados = typeof completo.dados === 'string' ? JSON.parse(completo.dados) : completo.dados;
+      if (!dados) {
+        throw new Error('Esta nota veio de um XML importado: não há dados de formulário para editar.');
+      }
+      setCopiaDe(null);
+      setEdicao({
+        id: doc.id,
+        numero: doc.numero,
+        dados,
+        rejeicao: doc.situacao === 'rejeitada' && doc.codigo_status ? `${doc.codigo_status} — ${doc.motivo}` : undefined,
+      });
+      setEmitindo(true);
+    } catch (err: any) {
+      falhar(err);
+    }
+  };
+
+  const fecharEmissao = () => {
+    setEmitindo(false);
+    setCopiaDe(null);
+    setEdicao(null);
   };
 
   /** "Validar XML" do exemplo: confere contra o XSD oficial sem enviar nada */
@@ -103,9 +187,11 @@ export const DocumentosView: React.FC<{ meta: Meta | null; onRecarregarPainel: (
     return (
       <NovaNFeView
         meta={meta}
-        onCancelar={() => setEmitindo(false)}
+        copiaDe={copiaDe}
+        edicao={edicao}
+        onCancelar={fecharEmissao}
         onEmitida={() => {
-          setEmitindo(false);
+          fecharEmissao();
           carregar();
           onRecarregarPainel();
         }}
@@ -114,151 +200,145 @@ export const DocumentosView: React.FC<{ meta: Meta | null; onRecarregarPainel: (
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex-1 flex flex-col min-h-0">
       {aviso && (
-        <div className="text-xs bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900
-          text-blue-800 dark:text-blue-300 rounded-xl px-4 py-2.5 flex items-center justify-between gap-3">
-          <span>{aviso}</span>
-          <button type="button" className="font-bold cursor-pointer" onClick={() => setAviso(null)}>×</button>
-        </div>
+        <Faixa tom="info" onFechar={() => setAviso(null)}>
+          {aviso}
+        </Faixa>
       )}
 
       {resultadoSchema && (
-        <div className="text-xs bg-white dark:bg-stone-900 border border-red-200 dark:border-red-900 rounded-xl px-4 py-3">
-          <div className="flex items-start justify-between gap-3">
-            <span className="font-semibold text-red-700 dark:text-red-300">
-              NF-e nº {resultadoSchema.numero}: o XML não passa no schema oficial
-              ({resultadoSchema.resultado.erros.length} problema{resultadoSchema.resultado.erros.length === 1 ? '' : 's'}).
-            </span>
-            <button type="button" className="font-bold cursor-pointer text-stone-400" onClick={() => setResultadoSchema(null)}>
-              ×
-            </button>
-          </div>
+        <Faixa tom="erro" onFechar={() => setResultadoSchema(null)}>
+          <span className="font-semibold">
+            NF-e nº {resultadoSchema.numero}: o XML não passa no schema oficial
+            ({resultadoSchema.resultado.erros.length} problema{resultadoSchema.resultado.erros.length === 1 ? '' : 's'}).
+          </span>
           <ListaErrosSchema erros={resultadoSchema.resultado.erros} schema={resultadoSchema.resultado.schema} />
-        </div>
+        </Faixa>
       )}
 
-      <Secao
-        titulo="Documentos"
-        descricao="Notas geradas, transmitidas e importadas"
-        acoes={
+      {/* Lista no padrão das grades do b2b admin */}
+      <input
+        ref={arquivoRef}
+        type="file"
+        accept=".xml,text/xml,application/xml"
+        className="hidden"
+        onChange={(e) => e.target.files?.[0] && importar(e.target.files[0])}
+      />
+      <Grade<DocumentoLista>
+        recurso="documentos"
+        colunas={colunas}
+        carregarPagina={api.listarDocumentos}
+        chave={(d) => d.id}
+        ordemPadrao={{ campo: 'data_emissao', direcao: 'desc' }}
+        recarregar={versao}
+        rotuloVazio="Nenhum documento emitido"
+        selecionada={selecionado}
+        onSelecionar={setSelecionado}
+        onDuploClique={(d) => podeEditar(d) && editar(d)}
+        larguraAcoes={172}
+        acoes={(d) => (
           <>
-            <input
-              ref={arquivoRef}
-              type="file"
-              accept=".xml,text/xml,application/xml"
-              className="hidden"
-              onChange={(e) => e.target.files?.[0] && importar(e.target.files[0])}
+            <AcaoGrade
+              titulo={
+                podeEditar(d)
+                  ? d.situacao === 'rejeitada'
+                    ? `Editar: corrigir a rejeição ${d.codigo_status} e transmitir de novo`
+                    : 'Editar antes de transmitir'
+                  : 'Só nota assinada ou rejeitada pode ser editada'
+              }
+              icone={<Pencil className="w-3.5 h-3.5" />}
+              onClick={() => editar(d)}
+              desabilitado={!podeEditar(d)}
             />
+            <AcaoGrade
+              titulo={podeTransmitir(d) ? 'Transmitir para a SEFAZ' : 'Só nota assinada ou rejeitada pode ser transmitida'}
+              icone={<Send className="w-3.5 h-3.5" />}
+              tom="verde"
+              onClick={() => setConfirmandoEnvio(d)}
+              desabilitado={!podeTransmitir(d)}
+            />
+            <AcaoGrade titulo="Imprimir DANFE" icone={<Printer className="w-3.5 h-3.5" />} onClick={() => imprimir(d)} />
+            <AcaoGrade
+              titulo={d.situacao === 'autorizada' ? 'Enviar por e-mail' : 'Só nota autorizada pode ser enviada por e-mail'}
+              icone={<Mail className="w-3.5 h-3.5" />}
+              onClick={() => setEnviandoEmail(d)}
+              desabilitado={d.situacao !== 'autorizada'}
+            />
+            <AcaoGrade titulo="Validar XML contra o schema" icone={<FileCheck2 className="w-3.5 h-3.5" />} onClick={() => validarSchema(d)} />
+            <AcaoGrade titulo="Validar assinatura digital" icone={<ShieldCheck className="w-3.5 h-3.5" />} onClick={() => validarAssinatura(d)} />
+          </>
+        )}
+        botoes={
+          <>
             <Botao icone={<FileInput className="w-3.5 h-3.5" />} onClick={() => arquivoRef.current?.click()}>
               Importar XML
             </Botao>
             <Botao
-              variante="primario"
-              icone={<FilePlus2 className="w-3.5 h-3.5" />}
-              onClick={() => setEmitindo(true)}
+              icone={<CopyPlus className="w-3.5 h-3.5" />}
+              onClick={novoCopiando}
+              disabled={!selecionado || !selecionado.copiavel}
+              title={
+                !selecionado
+                  ? 'Selecione na lista a nota que servirá de modelo'
+                  : !selecionado.copiavel
+                  ? 'Nota importada de XML: não há dados de formulário para copiar'
+                  : `Nova NF-e preenchida com os dados da nº ${selecionado.numero}`
+              }
             >
-              Nova NF-e
+              Novo (copiar)
+            </Botao>
+            <Botao
+              variante="primario"
+              icone={<Plus className="w-3.5 h-3.5" />}
+              onClick={() => {
+                setCopiaDe(null);
+                setEmitindo(true);
+              }}
+            >
+              Novo
             </Botao>
           </>
         }
-      >
-        {documentos.length === 0 ? (
-          <Vazio mensagem="Nenhum documento emitido." icone={<FileText className="w-6 h-6 text-stone-300" />} />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-[10px] uppercase tracking-wide text-stone-500 dark:text-stone-400 border-b border-stone-200 dark:border-stone-800">
-                  <th className="text-right font-semibold py-2 pr-3">Número</th>
-                  <th className="text-right font-semibold py-2 pr-3">Série</th>
-                  <th className="text-center font-semibold py-2 pr-3">Emissão</th>
-                  <th className="text-left font-semibold py-2 pr-3">Destinatário</th>
-                  <th className="text-right font-semibold py-2 pr-3">Valor</th>
-                  <th className="text-center font-semibold py-2 pr-3">Situação</th>
-                  <th className="text-center font-semibold py-2 pr-3">Ambiente</th>
-                  <th className="text-right font-semibold py-2">Ações</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-stone-100 dark:divide-stone-800">
-                {documentos.map((d) => {
-                  const situacao = SITUACOES[d.situacao] || SITUACOES.rascunho;
-                  const transmissivel = ['assinada', 'rejeitada'].includes(d.situacao);
+      />
 
-                  return (
-                    <React.Fragment key={d.id}>
-                      <tr
-                        className="hover:bg-stone-50 dark:hover:bg-stone-800/40 cursor-pointer"
-                        onClick={() => setSelecionado(selecionado?.id === d.id ? null : d)}
-                      >
-                        <td className="py-2 pr-3 text-right font-semibold">{d.numero}</td>
-                        <td className="py-2 pr-3 text-right">{d.serie}</td>
-                        <td className="py-2 pr-3 text-center">{formatarDataHora(d.data_emissao)}</td>
-                        <td className="py-2 pr-3 truncate max-w-[220px]">{d.destinatario_nome || '—'}</td>
-                        <td className="py-2 pr-3 text-right">{formatarMoeda(d.valor_total)}</td>
-                        <td className="py-2 pr-3 text-center">
-                          <Etiqueta texto={situacao.rotulo} classe={situacao.classe} />
-                        </td>
-                        <td className="py-2 pr-3 text-center text-[10px]">{AMBIENTES[d.ambiente]}</td>
-                        <td className="py-2">
-                          <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
-                            {transmissivel && (
-                              <Botao
-                                variante="primario"
-                                icone={<Send className="w-3.5 h-3.5" />}
-                                onClick={() => setConfirmandoEnvio(d)}
-                              >
-                                Transmitir
-                              </Botao>
-                            )}
-                            <Botao icone={<Printer className="w-3.5 h-3.5" />} onClick={() => imprimir(d)}>
-                              DANFE
-                            </Botao>
-                            <Botao
-                              icone={<Mail className="w-3.5 h-3.5" />}
-                              onClick={() => setEnviandoEmail(d)}
-                              disabled={d.situacao !== 'autorizada'}
-                            >
-                              E-mail
-                            </Botao>
-                            <Botao icone={<FileCheck2 className="w-3.5 h-3.5" />} onClick={() => validarSchema(d)}>
-                              Validar XML
-                            </Botao>
-                            <Botao icone={<ShieldCheck className="w-3.5 h-3.5" />} onClick={() => validarAssinatura(d)}>
-                              Assinatura
-                            </Botao>
-                          </div>
-                        </td>
-                      </tr>
-
-                      {selecionado?.id === d.id && (
-                        <tr className="bg-stone-50 dark:bg-stone-900/60">
-                          <td colSpan={8} className="px-3 py-3">
-                            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-[11px]">
-                              <div className="flex gap-2">
-                                <dt className="font-semibold text-stone-500">Chave</dt>
-                                <dd className="font-mono">{formatarChave(d.chave)}</dd>
-                              </div>
-                              <div className="flex gap-2">
-                                <dt className="font-semibold text-stone-500">Protocolo</dt>
-                                <dd className="font-mono">{d.protocolo || '—'}</dd>
-                              </div>
-                              <div className="flex gap-2 sm:col-span-2">
-                                <dt className="font-semibold text-stone-500">Retorno</dt>
-                                <dd>{d.codigo_status ? `${d.codigo_status} — ${d.motivo}` : '—'}</dd>
-                              </div>
-                            </dl>
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
+      {/* Mestre-detalhe: dados da nota selecionada, abaixo da grade */}
+      {selecionado ? (
+        <div className="border-t border-stone-200 dark:border-stone-800 shrink-0">
+          <div className="px-4 py-2 flex items-center justify-between gap-3 bg-stone-50 dark:bg-stone-950/40 border-b border-stone-200 dark:border-stone-800">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-400">
+              NF-e nº {selecionado.numero} • série {selecionado.serie}
+            </span>
+            <button
+              type="button"
+              onClick={() => setSelecionado(null)}
+              title="Fechar o detalhe"
+              className="p-1 rounded text-stone-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:text-rose-400 dark:hover:bg-rose-950/40 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
           </div>
-        )}
-      </Secao>
+          <dl className="px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 text-[11px]">
+            <div className="flex gap-2">
+              <dt className="font-semibold text-stone-500 w-20 shrink-0">Chave</dt>
+              <dd className="break-all">{formatarChave(selecionado.chave)}</dd>
+            </div>
+            <div className="flex gap-2">
+              <dt className="font-semibold text-stone-500 w-20 shrink-0">Protocolo</dt>
+              <dd>{selecionado.protocolo || '—'}</dd>
+            </div>
+            <div className="flex gap-2 sm:col-span-2">
+              <dt className="font-semibold text-stone-500 w-20 shrink-0">Retorno</dt>
+              <dd>{selecionado.codigo_status ? `${selecionado.codigo_status} — ${selecionado.motivo}` : '—'}</dd>
+            </div>
+          </dl>
+        </div>
+      ) : (
+        <div className="px-4 py-2 border-t border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-950/40 text-[11px] text-stone-500 dark:text-stone-400 shrink-0">
+          Clique numa nota para ver a chave, o protocolo e o retorno da SEFAZ aqui embaixo. Duplo clique abre a nota
+          para edição, quando ela ainda pode ser corrigida.
+        </div>
+      )}
 
       <PainelRespostas
         retorno={retorno}

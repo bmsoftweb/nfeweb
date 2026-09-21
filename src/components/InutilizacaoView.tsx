@@ -45,7 +45,7 @@ export const InutilizacaoView: React.FC<{ meta: Meta | null; modeloPadrao: strin
   };
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col">
       <Secao
         titulo="Inutilizar numeração"
         descricao="Informe a faixa de números que não será utilizada. A operação é definitiva."

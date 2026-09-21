@@ -21,7 +21,7 @@ interface PainelRespostasProps {
 /** Lista dos problemas de schema, um por linha, com o campo em destaque */
 export const ListaErrosSchema: React.FC<{ erros: ErroSchema[]; schema?: string }> = ({ erros, schema }) => (
   <div className="mt-2 flex flex-col gap-1.5">
-    <ul className="flex flex-col divide-y divide-red-100 dark:divide-red-900/60 border border-red-100 dark:border-red-900/60 rounded-lg overflow-hidden">
+    <ul className="flex flex-col divide-y divide-red-100 dark:divide-red-900/60 border border-red-100 dark:border-red-900/60">
       {erros.map((e, i) => (
         <li key={i} className="px-3 py-2 text-[11px] bg-red-50/60 dark:bg-red-950/30 flex flex-wrap gap-x-2">
           {e.campo && (
@@ -70,7 +70,7 @@ const Bloco: React.FC<{ texto: string; nomeArquivo: string }> = ({ texto, nomeAr
         </Botao>
       </div>
       <pre className="text-[11px] leading-relaxed font-mono whitespace-pre-wrap break-all max-h-[340px] overflow-auto
-        bg-stone-50 dark:bg-stone-950/60 border border-stone-200 dark:border-stone-800 rounded-lg p-3 pt-11">
+        bg-stone-50 dark:bg-stone-950/60 border border-stone-200 dark:border-stone-800 p-3 pt-11">
         {texto}
       </pre>
     </div>
@@ -82,7 +82,7 @@ export const PainelRespostas: React.FC<PainelRespostasProps> = ({ retorno, erro,
 
   if (carregando) {
     return (
-      <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-xl">
+      <div className="border-b border-stone-200 dark:border-stone-800">
         <Vazio mensagem="Aguardando a resposta da SEFAZ…" />
       </div>
     );
@@ -90,7 +90,7 @@ export const PainelRespostas: React.FC<PainelRespostasProps> = ({ retorno, erro,
 
   if (erro) {
     return (
-      <div className="bg-white dark:bg-stone-900 border border-red-200 dark:border-red-900 rounded-xl p-4">
+      <div className="bg-red-50/60 dark:bg-red-950/20 border-b border-red-200 dark:border-red-900 px-4 py-3">
         <div className="flex items-start gap-2 text-xs text-red-700 dark:text-red-300">
           <XCircle className="w-4 h-4 shrink-0 mt-px" />
           <div className="min-w-0 flex-1">
@@ -111,7 +111,7 @@ export const PainelRespostas: React.FC<PainelRespostasProps> = ({ retorno, erro,
 
   if (!retorno) {
     return (
-      <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-xl">
+      <div className="border-b border-stone-200 dark:border-stone-800">
         <Vazio mensagem="A resposta da SEFAZ aparece aqui depois da operação." />
       </div>
     );
@@ -125,7 +125,7 @@ export const PainelRespostas: React.FC<PainelRespostasProps> = ({ retorno, erro,
   ];
 
   return (
-    <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-xl overflow-hidden">
+    <div className="border-b border-stone-200 dark:border-stone-800">
       <div
         className={`px-4 py-2.5 flex items-center gap-2 text-xs font-semibold border-b ${
           retorno.sucesso
@@ -137,20 +137,18 @@ export const PainelRespostas: React.FC<PainelRespostasProps> = ({ retorno, erro,
         <span>{retorno.cStat} — {retorno.xMotivo || 'Sem descrição'}</span>
       </div>
 
-      <div className="px-3">
-        <Abas
-          ativa={aba}
-          onTrocar={setAba}
-          abas={[
-            { id: 'respostas', rotulo: 'Respostas' },
-            { id: 'xml', rotulo: 'XML Resposta' },
-            { id: 'completo', rotulo: 'Retorno Completo WS' },
-            { id: 'dados', rotulo: 'Dados Enviados' },
-          ]}
-        />
-      </div>
+      <Abas
+        ativa={aba}
+        onTrocar={setAba}
+        abas={[
+          { id: 'respostas', rotulo: 'Respostas' },
+          { id: 'xml', rotulo: 'XML Resposta' },
+          { id: 'completo', rotulo: 'Retorno Completo WS' },
+          { id: 'dados', rotulo: 'Dados Enviados' },
+        ]}
+      />
 
-      <div className="p-3">
+      <div className="px-4 py-3">
         {aba === 'respostas' && (
           <dl className="divide-y divide-stone-100 dark:divide-stone-800">
             {linhas

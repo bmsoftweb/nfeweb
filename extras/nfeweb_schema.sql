@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS nfe_usuarios (
   email         VARCHAR(120) NOT NULL,
   senha_hash    VARCHAR(255) NOT NULL,
   cargo         VARCHAR(60)  NULL,
+  -- Preferências das grades (larguras, ordem das colunas, linhas da grade), em JSON
+  config_listas TEXT         NULL,
   ativo         TINYINT(1)   NOT NULL DEFAULT 1,
   criado_em     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),

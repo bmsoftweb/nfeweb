@@ -1,6 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CalendarDays, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { INPUT_CLASS } from '../utils/formStyles';
+import { ALTURA_CONTROLE } from './ui';
+
+/**
+ * O visual padrão vem daqui, não de quem usa: antes o campo dependia de receber o
+ * className de fora e, sem ele, saía com a fonte do navegador (maior) e em mono. Agora é igual aos demais campos.
+ */
+const ESTILO_CAMPO = `${INPUT_CLASS} ${ALTURA_CONTROLE} w-full`;
 
 interface DateFieldProps {
   id?: string;
@@ -240,7 +248,7 @@ export const DateField: React.FC<DateFieldProps> = ({
           <select
             value={mesVisivel.ano}
             onChange={(e) => setMesVisivel((v) => ({ ...v, ano: Number(e.target.value) }))}
-            className="bg-stone-50 dark:bg-stone-800 text-xs font-semibold text-stone-700 dark:text-stone-200 px-1.5 py-1 cursor-pointer font-mono"
+            className="bg-stone-50 dark:bg-stone-800 text-xs font-semibold text-stone-700 dark:text-stone-200 px-1.5 py-1 cursor-pointer"
           >
             {anos.map((a) => (
               <option key={a} value={a}>
@@ -335,7 +343,7 @@ export const DateField: React.FC<DateFieldProps> = ({
           required={required}
           placeholder={placeholder}
           maxLength={10}
-          className={`${className} font-mono pr-8`}
+          className={`${ESTILO_CAMPO} pr-8 ${className}`}
         />
         <button
           type="button"
@@ -353,7 +361,7 @@ export const DateField: React.FC<DateFieldProps> = ({
           type="time"
           value={hora}
           onChange={(e) => emitir(isoData || hojeIso, e.target.value)}
-          className={`${className} w-24 font-mono shrink-0`}
+          className={`${ESTILO_CAMPO} w-24 shrink-0 ${className}`}
         />
       )}
 

@@ -43,20 +43,21 @@ export const ConsultasView: React.FC<{ meta: Meta | null; ufPadrao: string }> = 
       : [];
 
   return (
-    <div className="flex flex-col gap-4">
-      <Secao titulo="Consultas" descricao="Serviços de consulta da SEFAZ">
-        <Abas
-          ativa={aba}
-          onTrocar={setAba}
-          abas={[
-            { id: 'status', rotulo: 'Status do Serviço', icone: <Activity className="w-3.5 h-3.5" /> },
-            { id: 'chave', rotulo: 'Consultar pela Chave', icone: <FileSearch className="w-3.5 h-3.5" /> },
-            { id: 'recibo', rotulo: 'Recibo do Lote', icone: <Receipt className="w-3.5 h-3.5" /> },
-            { id: 'cadastro', rotulo: 'Consulta Cadastro', icone: <IdCard className="w-3.5 h-3.5" /> },
-          ]}
-        />
+    <div className="flex flex-col">
+      {/* Abas no topo da tela, como no b2b admin */}
+      <Abas
+        ativa={aba}
+        onTrocar={setAba}
+        abas={[
+          { id: 'status', rotulo: 'Status do Serviço', icone: <Activity className="w-3.5 h-3.5" /> },
+          { id: 'chave', rotulo: 'Consultar pela Chave', icone: <FileSearch className="w-3.5 h-3.5" /> },
+          { id: 'recibo', rotulo: 'Recibo do Lote', icone: <Receipt className="w-3.5 h-3.5" /> },
+          { id: 'cadastro', rotulo: 'Consulta Cadastro', icone: <IdCard className="w-3.5 h-3.5" /> },
+        ]}
+      />
 
-        <div className="pt-4">
+      <Secao titulo="Serviços de consulta da SEFAZ">
+        <div>
           {aba === 'status' && (
             <div className="flex flex-wrap items-end gap-3">
               <p className="text-xs text-stone-500 dark:text-stone-400 flex-1 min-w-[220px]">
@@ -77,7 +78,7 @@ export const ConsultasView: React.FC<{ meta: Meta | null; ufPadrao: string }> = 
                 placeholder="44 dígitos"
                 value={chave}
                 onChange={(e) => setChave(e.target.value.replace(/\D/g, '').slice(0, 44))}
-                className="flex-1 min-w-[320px] font-mono"
+                className="flex-1 min-w-[320px]"
               />
               <Botao
                 variante="primario"
@@ -98,7 +99,7 @@ export const ConsultasView: React.FC<{ meta: Meta | null; ufPadrao: string }> = 
                 inputMode="numeric"
                 value={recibo}
                 onChange={(e) => setRecibo(e.target.value.replace(/\D/g, '').slice(0, 15))}
-                className="flex-1 min-w-[240px] font-mono"
+                className="flex-1 min-w-[240px]"
               />
               <Botao
                 variante="primario"
@@ -137,7 +138,7 @@ export const ConsultasView: React.FC<{ meta: Meta | null; ufPadrao: string }> = 
                 inputMode="numeric"
                 value={documento}
                 onChange={(e) => setDocumento(e.target.value.replace(/\D/g, ''))}
-                className="flex-1 min-w-[220px] font-mono"
+                className="flex-1 min-w-[220px]"
               />
               <Botao
                 variante="primario"

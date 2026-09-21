@@ -21,6 +21,42 @@ function p2(n: number) {
   return String(n).padStart(2, '0');
 }
 
+/**
+ * Data informada no documento -> Date com os campos locais em horário de Brasília.
+ *
+ * `new Date("2026-09-20")` é meia-noite em UTC: num servidor no fuso de São Paulo
+ * vira 21h do dia anterior (e no dia 1º cai no mês anterior, errando o AAMM da
+ * chave); num servidor em UTC fica meia-noite. Aqui:
+ *   - vazio                   -> agora
+ *   - "2026-09-20"            -> esse dia, na hora atual de Brasília
+ *   - "2026-09-20T14:30[:05]" -> essa hora, já em Brasília
+ *   - com fuso ("...-03:00", "...Z") -> o instante, convertido para Brasília
+ */
+export function dataDoDocumento(texto?: string | null): Date {
+  if (!texto) return agora();
+
+  const soData = String(texto).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (soData) {
+    const hora = agora();
+    return new Date(
+      Number(soData[1]), Number(soData[2]) - 1, Number(soData[3]),
+      hora.getHours(), hora.getMinutes(), hora.getSeconds(),
+    );
+  }
+
+  const semFuso = String(texto).match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (semFuso) {
+    return new Date(
+      Number(semFuso[1]), Number(semFuso[2]) - 1, Number(semFuso[3]),
+      Number(semFuso[4]), Number(semFuso[5]), Number(semFuso[6] || 0),
+    );
+  }
+
+  const instante = new Date(texto);
+  if (Number.isNaN(instante.getTime())) throw new Error(`Data inválida: "${texto}".`);
+  return new Date(instante.getTime() + instante.getTimezoneOffset() * 60 * 1000 + MS_BRASILIA);
+}
+
 /** "2026-09-20" */
 export function dataISO(d: Date = agora()): string {
   return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;

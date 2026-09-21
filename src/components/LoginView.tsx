@@ -13,7 +13,7 @@ interface LoginViewProps {
   tema: ThemeMode;
   onAlternarTema: () => void;
   avisoInicial?: string | null;
-  onEntrou: (usuario: Usuario, empresa: Emitente, lembrar: boolean) => void;
+  onEntrou: (usuario: Usuario, empresa: Emitente, token: string, lembrar: boolean) => void;
 }
 
 export const LoginView: React.FC<LoginViewProps> = ({ tema, onAlternarTema, avisoInicial, onEntrou }) => {
@@ -38,7 +38,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ tema, onAlternarTema, avis
       if (lembrar) salvarLembrete({ cnpj: cnpjLimpo, usuario });
       else limparLembrete();
 
-      onEntrou(resposta.usuario, resposta.empresa, lembrar);
+      onEntrou(resposta.usuario, resposta.empresa, resposta.token, lembrar);
     } catch (err: any) {
       setErro(err.message || 'Não foi possível entrar.');
     } finally {

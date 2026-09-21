@@ -11,7 +11,7 @@ import crypto from 'crypto';
 import { Contexto } from './contexto.js';
 import { montarChave } from './chave.js';
 import { CODIGO_UF, urlsConsulta } from './servicos.js';
-import { dataHoraDFe, agora } from './datas.js';
+import { dataDoDocumento, dataHoraDFe } from './datas.js';
 import { DECLARACAO, NS_NFE, grupo, grupoObrigatorio, limparTexto, num, tag } from './xml.js';
 
 // ---------------------------------------------------------------------------
@@ -322,7 +322,7 @@ export function gerarNFe(ctx: Contexto, doc: DocumentoNFe): NFeGerada {
   if (!doc.itens?.length) throw new Error('A nota precisa de ao menos um item.');
   if (!emit.cnpj) throw new Error('O CNPJ do emitente não está preenchido em Configurações › Emitente.');
 
-  const emissao = doc.ide.dataEmissao ? new Date(doc.ide.dataEmissao) : agora();
+  const emissao = dataDoDocumento(doc.ide.dataEmissao);
   const tipoEmissao = doc.ide.tipoEmissao ?? (cfg.geral.formaEmissao === 1 ? 1 : cfg.geral.formaEmissao);
 
   const { chave, codigoNumerico } = montarChave({
@@ -367,7 +367,7 @@ export function gerarNFe(ctx: Contexto, doc: DocumentoNFe): NFeGerada {
     tag('serie', doc.ide.serie),
     tag('nNF', doc.ide.numero),
     tag('dhEmi', dataHoraDFe(emissao)),
-    doc.ide.dataSaida ? tag('dhSaiEnt', dataHoraDFe(new Date(doc.ide.dataSaida))) : '',
+    doc.ide.dataSaida ? tag('dhSaiEnt', dataHoraDFe(dataDoDocumento(doc.ide.dataSaida))) : '',
     tag('tpNF', doc.ide.tipoDocumento),
     tag('idDest', idDest),
     tag('cMunFG', doc.ide.codigoMunicipioFG || emit.codigo_municipio),

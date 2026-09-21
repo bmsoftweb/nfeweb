@@ -4,7 +4,7 @@ import {
 } from 'lucide-react';
 import * as api from '../services/api';
 import { CertificadoInfo, ConfigNFe, Emitente, Meta } from '../types';
-import { Abas, Botao, Campo, Confirmacao, Secao, Selecao, Texto, Area } from './ui';
+import { Abas, Area, Botao, Campo, Confirmacao, Faixa, Secao, Selecao, Texto } from './ui';
 import { Toggle } from './Toggle';
 import { formatarCnpj, formatarData } from '../utils/formatters';
 
@@ -118,33 +118,23 @@ export const ConfiguracoesView: React.FC<{
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      {aviso && (
-        <div className="text-xs bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 text-emerald-800 dark:text-emerald-300 rounded-xl px-4 py-2.5">
-          {aviso}
-        </div>
-      )}
-      {erro && (
-        <div className="text-xs bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 text-red-800 dark:text-red-300 rounded-xl px-4 py-2.5">
-          {erro}
-        </div>
-      )}
+    <div className="flex flex-col">
+      <Abas
+        ativa={aba}
+        onTrocar={setAba}
+        abas={[
+          { id: 'certificado', rotulo: 'Certificado', icone: <ShieldCheck className="w-3.5 h-3.5" /> },
+          { id: 'geral', rotulo: 'Geral', icone: <FileCog className="w-3.5 h-3.5" /> },
+          { id: 'webservice', rotulo: 'WebService', icone: <Globe2 className="w-3.5 h-3.5" /> },
+          { id: 'emitente', rotulo: 'Emitente', icone: <Building2 className="w-3.5 h-3.5" /> },
+          { id: 'arquivos', rotulo: 'Arquivos', icone: <FolderTree className="w-3.5 h-3.5" /> },
+          { id: 'danfe', rotulo: 'Documento Auxiliar', icone: <Printer className="w-3.5 h-3.5" /> },
+          { id: 'email', rotulo: 'Email', icone: <Mail className="w-3.5 h-3.5" /> },
+        ]}
+      />
 
-      <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-xl px-3">
-        <Abas
-          ativa={aba}
-          onTrocar={setAba}
-          abas={[
-            { id: 'certificado', rotulo: 'Certificado', icone: <ShieldCheck className="w-3.5 h-3.5" /> },
-            { id: 'geral', rotulo: 'Geral', icone: <FileCog className="w-3.5 h-3.5" /> },
-            { id: 'webservice', rotulo: 'WebService', icone: <Globe2 className="w-3.5 h-3.5" /> },
-            { id: 'emitente', rotulo: 'Emitente', icone: <Building2 className="w-3.5 h-3.5" /> },
-            { id: 'arquivos', rotulo: 'Arquivos', icone: <FolderTree className="w-3.5 h-3.5" /> },
-            { id: 'danfe', rotulo: 'Documento Auxiliar', icone: <Printer className="w-3.5 h-3.5" /> },
-            { id: 'email', rotulo: 'Email', icone: <Mail className="w-3.5 h-3.5" /> },
-          ]}
-        />
-      </div>
+      {aviso && <Faixa tom="sucesso">{aviso}</Faixa>}
+      {erro && <Faixa tom="erro" onFechar={() => setErro(null)}>{erro}</Faixa>}
 
       {/* ---------------- Certificado ---------------- */}
       {aba === 'certificado' && (
@@ -431,14 +421,14 @@ export const ConfiguracoesView: React.FC<{
               inputMode="numeric"
               value={emitente.cnpj || ''}
               onChange={(e) => alterarEmitente('cnpj', e.target.value.replace(/\D/g, '').slice(0, 14))}
-              className="lg:col-span-3 font-mono"
+              className="lg:col-span-3"
             />
             <Texto
               rotulo="Inscrição Estadual"
               inputMode="numeric"
               value={emitente.inscricao_estadual || ''}
               onChange={(e) => alterarEmitente('inscricao_estadual', e.target.value)}
-              className="lg:col-span-3 font-mono"
+              className="lg:col-span-3"
             />
             <Selecao
               rotulo="Regime tributário (CRT)"
@@ -503,7 +493,7 @@ export const ConfiguracoesView: React.FC<{
               inputMode="numeric"
               value={emitente.codigo_municipio || ''}
               onChange={(e) => alterarEmitente('codigo_municipio', e.target.value.replace(/\D/g, '').slice(0, 7))}
-              className="lg:col-span-3 font-mono"
+              className="lg:col-span-3"
             />
             <Texto
               rotulo="Município"
@@ -525,14 +515,14 @@ export const ConfiguracoesView: React.FC<{
               inputMode="numeric"
               value={emitente.cep || ''}
               onChange={(e) => alterarEmitente('cep', e.target.value.replace(/\D/g, '').slice(0, 8))}
-              className="lg:col-span-3 font-mono"
+              className="lg:col-span-3"
             />
             <Texto
               rotulo="Telefone"
               inputMode="numeric"
               value={emitente.fone || ''}
               onChange={(e) => alterarEmitente('fone', e.target.value.replace(/\D/g, ''))}
-              className="lg:col-span-3 font-mono"
+              className="lg:col-span-3"
             />
           </div>
         </Secao>
@@ -685,7 +675,8 @@ export const ConfiguracoesView: React.FC<{
         </Secao>
       )}
 
-      <div className="flex justify-end">
+      {/* Barra de ações no pé, como a do formulário do b2b admin */}
+      <div className="px-4 py-3 border-b border-stone-200 dark:border-stone-800 flex items-center justify-end gap-2.5 bg-stone-50 dark:bg-stone-950/40">
         <Botao variante="primario" icone={<Save className="w-3.5 h-3.5" />} carregando={salvando} onClick={salvar}>
           Salvar Configurações
         </Botao>

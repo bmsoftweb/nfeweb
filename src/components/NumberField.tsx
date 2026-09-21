@@ -6,6 +6,11 @@ import {
   aplicarDigitacao,
   aplicarColagem,
 } from '../utils/numeroBancario';
+import { INPUT_CLASS } from '../utils/formStyles';
+import { ALTURA_CONTROLE } from './ui';
+
+/** Visual padrão embutido, como no DateField: igual aos demais campos */
+const ESTILO_CAMPO = `${INPUT_CLASS} ${ALTURA_CONTROLE} w-full`;
 
 interface NumberFieldProps {
   id?: string;
@@ -80,7 +85,7 @@ export const NumberField: React.FC<NumberFieldProps> = ({
       required={required}
       disabled={disabled}
       placeholder={placeholder ?? paraExibicao({ negativo: false, digitos: '0' }, scale)}
-      className={`${className} font-mono text-right`}
+      className={`${ESTILO_CAMPO} text-right ${className}`}
     />
   );
 };

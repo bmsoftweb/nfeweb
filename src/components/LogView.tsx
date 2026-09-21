@@ -1,90 +1,118 @@
-import React, { useEffect, useState } from 'react';
-import { CheckCircle2, ScrollText, XCircle } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { CheckCircle2, X, XCircle } from 'lucide-react';
 import * as api from '../services/api';
-import { Secao, Vazio } from './ui';
+import { ColunaGrade, Grade } from './Grade';
 import { formatarChave, formatarDataHora } from '../utils/formatters';
 
-/** Aba "Log": o histórico de comunicação com a SEFAZ, com envio e retorno */
+interface RegistroLog {
+  id: number;
+  operacao: string;
+  url: string;
+  chave: string | null;
+  sucesso: number;
+  codigo_status: number | null;
+  motivo: string | null;
+  duracao_ms: number;
+  criado_em: string;
+}
+
+/**
+ * Aba "Log": o histórico de comunicação com a SEFAZ, na grade padrão do b2b admin.
+ * Um clique seleciona a chamada e mostra o envio e o retorno abaixo da grade.
+ */
 export const LogView: React.FC = () => {
-  const [registros, setRegistros] = useState<any[]>([]);
-  const [aberto, setAberto] = useState<any | null>(null);
+  const [selecionado, setSelecionado] = useState<RegistroLog | null>(null);
+  const [detalhe, setDetalhe] = useState<{ id: number; envio: string; retorno: string; url: string } | null>(null);
 
-  useEffect(() => {
-    api.listarLog().then(setRegistros).catch(() => setRegistros([]));
-  }, []);
-
-  const abrir = async (id: number) => {
-    if (aberto?.id === id) return setAberto(null);
-    setAberto(await api.buscarLog(id));
+  const selecionar = async (linha: RegistroLog | null) => {
+    setSelecionado(linha);
+    if (!linha) return setDetalhe(null);
+    // O envio e o retorno são grandes: só vêm quando a linha é aberta
+    if (detalhe?.id === linha.id) return;
+    try {
+      const completo = await api.buscarLog(linha.id);
+      setDetalhe({ id: linha.id, envio: completo.envio, retorno: completo.retorno, url: completo.url });
+    } catch {
+      setDetalhe(null);
+    }
   };
 
-  return (
-    <Secao titulo="Log de comunicação" descricao="Últimas 100 chamadas aos webservices">
-      {registros.length === 0 ? (
-        <Vazio mensagem="Nenhuma comunicação registrada." icone={<ScrollText className="w-6 h-6 text-stone-300" />} />
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-[10px] uppercase tracking-wide text-stone-500 dark:text-stone-400 border-b border-stone-200 dark:border-stone-800">
-                <th className="text-center font-semibold py-2 pr-3">Quando</th>
-                <th className="text-left font-semibold py-2 pr-3">Operação</th>
-                <th className="text-left font-semibold py-2 pr-3">Chave</th>
-                <th className="text-center font-semibold py-2 pr-3">Resultado</th>
-                <th className="text-right font-semibold py-2 pr-3">Tempo</th>
-                <th className="text-left font-semibold py-2">Retorno</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-stone-100 dark:divide-stone-800">
-              {registros.map((l) => (
-                <React.Fragment key={l.id}>
-                  <tr
-                    className="hover:bg-stone-50 dark:hover:bg-stone-800/40 cursor-pointer"
-                    onClick={() => abrir(l.id)}
-                  >
-                    <td className="py-2 pr-3 text-center whitespace-nowrap">{formatarDataHora(l.criado_em)}</td>
-                    <td className="py-2 pr-3">{l.operacao}</td>
-                    <td className="py-2 pr-3 font-mono text-[10px]">{l.chave ? formatarChave(l.chave) : '—'}</td>
-                    <td className="py-2 pr-3 text-center">
-                      {l.sucesso ? (
-                        <CheckCircle2 className="w-4 h-4 text-emerald-500 inline" />
-                      ) : (
-                        <XCircle className="w-4 h-4 text-red-500 inline" />
-                      )}
-                    </td>
-                    <td className="py-2 pr-3 text-right">{l.duracao_ms} ms</td>
-                    <td className="py-2 truncate max-w-[320px]">
-                      {l.codigo_status} — {l.motivo}
-                    </td>
-                  </tr>
+  const colunas = useMemo<ColunaGrade<RegistroLog>[]>(
+    () => [
+      { nome: 'criado_em', rotulo: 'Quando', tipo: 'data', valor: (l) => formatarDataHora(l.criado_em) },
+      { nome: 'operacao', rotulo: 'Operação', valor: (l) => l.operacao },
+      {
+        nome: 'chave',
+        rotulo: 'Chave',
+        valor: (l) => (l.chave ? formatarChave(l.chave) : '—'),
+        dica: (l) => l.chave || undefined,
+      },
+      {
+        nome: 'sucesso',
+        rotulo: 'Resultado',
+        tipo: 'centro',
+        valor: (l) =>
+          l.sucesso ? (
+            <CheckCircle2 className="w-4 h-4 text-emerald-500 inline" aria-label="Sucesso" />
+          ) : (
+            <XCircle className="w-4 h-4 text-red-500 inline" aria-label="Falha" />
+          ),
+      },
+      { nome: 'codigo_status', rotulo: 'cStat', tipo: 'numero', valor: (l) => l.codigo_status ?? '—' },
+      { nome: 'duracao_ms', rotulo: 'Tempo (ms)', tipo: 'numero', valor: (l) => l.duracao_ms },
+      { nome: 'motivo', rotulo: 'Retorno', valor: (l) => l.motivo || '—', dica: (l) => l.motivo || undefined },
+    ],
+    [],
+  );
 
-                  {aberto?.id === l.id && (
-                    <tr className="bg-stone-50 dark:bg-stone-900/60">
-                      <td colSpan={6} className="px-3 py-3">
-                        <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-                          {[
-                            ['Envio', aberto.envio],
-                            ['Retorno', aberto.retorno],
-                          ].map(([titulo, texto]) => (
-                            <div key={titulo}>
-                              <div className="text-[10px] font-bold uppercase text-stone-400 mb-1">{titulo}</div>
-                              <pre className="text-[10px] font-mono whitespace-pre-wrap break-all max-h-56 overflow-auto
-                                bg-white dark:bg-stone-950/60 border border-stone-200 dark:border-stone-800 rounded-lg p-2">
-                                {texto || '—'}
-                              </pre>
-                            </div>
-                          ))}
-                        </div>
-                        <div className="text-[11px] text-stone-500 mt-2 break-all">{aberto.url}</div>
-                      </td>
-                    </tr>
-                  )}
-                </React.Fragment>
-              ))}
-            </tbody>
-          </table>
+  return (
+    <div className="flex-1 flex flex-col min-h-0">
+      <Grade<RegistroLog>
+        recurso="log"
+        colunas={colunas}
+        carregarPagina={api.listarLog}
+        chave={(l) => l.id}
+        ordemPadrao={{ campo: 'criado_em', direcao: 'desc' }}
+        rotuloVazio="Nenhuma comunicação registrada"
+        selecionada={selecionado}
+        onSelecionar={selecionar}
+      />
+
+      {/* Mestre-detalhe: envio e retorno da chamada selecionada */}
+      {selecionado && detalhe?.id === selecionado.id ? (
+        <div className="border-t border-stone-200 dark:border-stone-800 shrink-0">
+          <div className="px-4 py-2 flex items-center justify-between gap-3 bg-stone-50 dark:bg-stone-950/40 border-b border-stone-200 dark:border-stone-800">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-400 truncate">
+              {selecionado.operacao} • {formatarDataHora(selecionado.criado_em)} • {detalhe.url}
+            </span>
+            <button
+              type="button"
+              onClick={() => selecionar(null)}
+              title="Fechar o detalhe"
+              className="p-1 rounded text-stone-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:text-rose-400 dark:hover:bg-rose-950/40 cursor-pointer shrink-0"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div className="grid grid-cols-1 xl:grid-cols-2">
+            {[
+              ['Envio', detalhe.envio],
+              ['Retorno', detalhe.retorno],
+            ].map(([titulo, texto], i) => (
+              <div key={titulo} className={i === 0 ? 'xl:border-r border-stone-200 dark:border-stone-800' : ''}>
+                <div className="px-4 pt-2 text-[10px] font-semibold uppercase tracking-wider text-stone-400">{titulo}</div>
+                <pre className="px-4 py-2 text-[10px] font-mono whitespace-pre-wrap break-all max-h-56 overflow-auto text-stone-700 dark:text-stone-300">
+                  {texto || '—'}
+                </pre>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="px-4 py-2 border-t border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-950/40 text-[11px] text-stone-500 dark:text-stone-400 shrink-0">
+          Clique numa chamada para ver o envelope enviado e a resposta da SEFAZ aqui embaixo.
         </div>
       )}
-    </Secao>
+    </div>
   );
 };

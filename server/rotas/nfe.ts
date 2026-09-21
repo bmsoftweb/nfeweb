@@ -1,7 +1,7 @@
 /**
  * Rotas da API. Cada uma corresponde a um botão do formulário do exemplo
- * Delphi; o isolamento por empresa vem do header `x-empresa-id`, como no
- * painel administrativo do B2B.
+ * Delphi; o isolamento por empresa vem da sessão (token assinado, ver auth.ts),
+ * e não de um header que o cliente controla.
  */
 import { Request, Response, Router } from 'express';
 import { pool } from '../db.js';
@@ -30,8 +30,34 @@ import {
   statusServico,
 } from '../nfe/operacoes.js';
 
+/**
+ * Situações em que a nota ainda pode ser editada. A SEFAZ não guarda nota
+ * rejeitada, então o número continua livre; assinada nunca saiu daqui.
+ */
+const SITUACOES_EDITAVEIS = ['assinada', 'rejeitada'];
+
+function exigirEditavel(situacao: string) {
+  if (SITUACOES_EDITAVEIS.includes(situacao)) return;
+
+  const motivos: Record<string, string> = {
+    autorizada:
+      'Nota autorizada não pode ser editada. Para corrigir, use a Carta de Correção (Eventos) ' +
+      'ou cancele e emita outra.',
+    cancelada: 'Nota cancelada não pode ser editada: o número já foi usado na SEFAZ.',
+    denegada: 'Nota denegada não pode ser editada: o número já foi usado na SEFAZ.',
+    enviada:
+      'A nota foi enviada e aguarda o retorno. Consulte o recibo antes de editar — ' +
+      'ela pode ter sido autorizada.',
+  };
+  throw new Error(motivos[situacao] || `Nota na situação "${situacao}" não pode ser editada.`);
+}
+
+/**
+ * A empresa vem da sessão validada pelo exigirSessao — nunca de um header, que o
+ * cliente poderia trocar para agir em nome de outro emitente.
+ */
 function empresaDaRequisicao(req: Request): number {
-  const id = Number(req.header('x-empresa-id'));
+  const id = req.usuario?.empresaId;
   if (!id) throw new Error('Sessão sem empresa. Entre novamente.');
   return id;
 }
@@ -218,6 +244,17 @@ export function criarRotasNFe(): Router {
     const documento = req.body?.documento;
     if (!documento) throw new Error('Informe os dados da nota.');
 
+    // Edição: confere a situação antes de gerar, para não assinar à toa
+    const documentoId = req.body?.documentoId ? Number(req.body.documentoId) : null;
+    if (documentoId) {
+      const [linhas] = await pool.query<any[]>(
+        'SELECT situacao FROM nfe_documentos WHERE id = ? AND empresa_id = ? LIMIT 1',
+        [documentoId, empresaId],
+      );
+      if (!linhas.length) throw new Error('Documento não encontrado.');
+      exigirEditavel(linhas[0].situacao);
+    }
+
     const gerada = gerarNFe(ctx, documento);
     const assinada = assinar(semDeclaracao(gerada.xml), 'infNFe', `NFe${gerada.chave}`, ctx.certificado);
     const xml = `<?xml version="1.0" encoding="UTF-8"?>${assinada}`;
@@ -230,22 +267,47 @@ export function criarRotasNFe(): Router {
     );
 
     const dest = documento.destinatario;
-    await pool.query(
-      `INSERT INTO nfe_documentos
-         (empresa_id, chave, modelo, serie, numero, situacao, ambiente, data_emissao,
-          destinatario_documento, destinatario_nome, valor_total, dados, xml)
-       VALUES (?, ?, ?, ?, ?, 'assinada', ?, ?, ?, ?, ?, CAST(? AS JSON), ?)
-       ON DUPLICATE KEY UPDATE
-         situacao = 'assinada', valor_total = VALUES(valor_total),
-         dados = VALUES(dados), xml = VALUES(xml)`,
-      [
-        empresaId, gerada.chave, gerada.modelo, gerada.serie, gerada.numero,
-        ctx.config.webservice.ambiente, dataHoraMysql(),
-        (dest?.cnpj || dest?.cpf || '').replace(/\D/g, '') || null,
-        dest?.nome || null, gerada.totais.vNF,
-        JSON.stringify(documento), xml,
-      ],
-    );
+    const destinatarioDocumento = (dest?.cnpj || dest?.cpf || '').replace(/\D/g, '') || null;
+
+    if (documentoId) {
+      // Edição regrava o MESMO registro: a nota corrigida não vira uma segunda linha.
+      // A chave muda (o código numérico é novo) e o retorno da rejeição anterior é
+      // limpo; o histórico dela continua no nfe_log. A condição na situação protege
+      // contra alguém ter transmitido a nota entre abrir a edição e gerar.
+      const [resultado] = await pool.query<any>(
+        `UPDATE nfe_documentos
+            SET chave = ?, modelo = ?, serie = ?, numero = ?, situacao = 'assinada', ambiente = ?,
+                data_emissao = ?, destinatario_documento = ?, destinatario_nome = ?, valor_total = ?,
+                dados = CAST(? AS JSON), xml = ?,
+                recibo = NULL, protocolo = NULL, codigo_status = NULL, motivo = NULL, xml_protocolo = NULL
+          WHERE id = ? AND empresa_id = ? AND situacao IN (${SITUACOES_EDITAVEIS.map(() => '?').join(', ')})`,
+        [
+          gerada.chave, gerada.modelo, gerada.serie, gerada.numero, ctx.config.webservice.ambiente,
+          dataHoraMysql(), destinatarioDocumento, dest?.nome || null, gerada.totais.vNF,
+          JSON.stringify(documento), xml,
+          documentoId, empresaId, ...SITUACOES_EDITAVEIS,
+        ],
+      );
+      if (!resultado.affectedRows) {
+        throw new Error('A nota mudou de situação enquanto era editada. Recarregue a lista e confira.');
+      }
+    } else {
+      await pool.query(
+        `INSERT INTO nfe_documentos
+           (empresa_id, chave, modelo, serie, numero, situacao, ambiente, data_emissao,
+            destinatario_documento, destinatario_nome, valor_total, dados, xml)
+         VALUES (?, ?, ?, ?, ?, 'assinada', ?, ?, ?, ?, ?, CAST(? AS JSON), ?)
+         ON DUPLICATE KEY UPDATE
+           situacao = 'assinada', valor_total = VALUES(valor_total),
+           dados = VALUES(dados), xml = VALUES(xml)`,
+        [
+          empresaId, gerada.chave, gerada.modelo, gerada.serie, gerada.numero,
+          ctx.config.webservice.ambiente, dataHoraMysql(),
+          destinatarioDocumento, dest?.nome || null, gerada.totais.vNF,
+          JSON.stringify(documento), xml,
+        ],
+      );
+    }
 
     res.json({ success: true, chave: gerada.chave, totais: gerada.totais, xml });
   }));
@@ -512,10 +574,60 @@ export function criarRotasNFe(): Router {
       res.json(linhas);
     });
 
-  r.get('/documentos', listagem(
-    'nfe_documentos', 'id',
-    'id, chave, modelo, serie, numero, situacao, ambiente, data_emissao, destinatario_nome, valor_total, protocolo, codigo_status, motivo',
-  ));
+  /**
+   * Listagem paginada das grades (padrão b2b admin): página, registros por página,
+   * busca e ordenação vêm da tela, mas só por nomes da whitelist — nenhum nome de
+   * coluna do cliente chega ao SQL.
+   */
+  const paginada = (def: {
+    tabela: string;
+    colunas: string;
+    /** campo da grade -> expressão SQL de ordenação */
+    ordenaveis: Record<string, string>;
+    /** expressões pesquisadas pela busca simples */
+    busca: string[];
+    ordemPadrao: string;
+    direcaoPadrao: 'asc' | 'desc';
+  }) =>
+    rota(async (req, res) => {
+      const empresaId = empresaDaRequisicao(req);
+      const porPagina = [10, 25, 50, 100].includes(Number(req.query.porPagina)) ? Number(req.query.porPagina) : 25;
+      const pagina = Math.max(1, Math.floor(Number(req.query.pagina) || 1));
+      const ordem = def.ordenaveis[String(req.query.ordem)] || def.ordenaveis[def.ordemPadrao];
+      const direcao = req.query.direcao === 'asc' ? 'ASC' : req.query.direcao === 'desc' ? 'DESC' : def.direcaoPadrao.toUpperCase();
+
+      const termo = String(req.query.busca || '').trim();
+      const filtro = termo ? ` AND (${def.busca.map((c) => `${c} LIKE ?`).join(' OR ')})` : '';
+      const params = termo ? def.busca.map(() => `%${termo}%`) : [];
+
+      const [[{ total }]] = await pool.query<any[]>(
+        `SELECT COUNT(*) AS total FROM ${def.tabela} WHERE empresa_id = ?${filtro}`,
+        [empresaId, ...params],
+      );
+      // O id desempata a ordenação, para a paginação não repetir nem pular linha
+      const [linhas] = await pool.query<any[]>(
+        `SELECT ${def.colunas} FROM ${def.tabela} WHERE empresa_id = ?${filtro}
+          ORDER BY ${ordem} ${direcao}, id ${direcao} LIMIT ? OFFSET ?`,
+        [empresaId, ...params, porPagina, (pagina - 1) * porPagina],
+      );
+
+      res.json({ data: linhas, total: Number(total), totalPages: Math.max(1, Math.ceil(Number(total) / porPagina)) });
+    });
+
+  r.get('/documentos', paginada({
+    tabela: 'nfe_documentos',
+    colunas:
+      'id, chave, modelo, serie, numero, situacao, ambiente, data_emissao, destinatario_nome, valor_total, protocolo, codigo_status, motivo, ' +
+      // Só nota gerada aqui guarda os dados do formulário; XML importado não tem o que copiar
+      '(dados IS NOT NULL) AS copiavel',
+    ordenaveis: {
+      numero: 'numero', serie: 'serie', data_emissao: 'data_emissao', destinatario_nome: 'destinatario_nome',
+      valor_total: 'valor_total', situacao: 'situacao', ambiente: 'ambiente', motivo: 'codigo_status',
+    },
+    busca: ['CAST(numero AS CHAR)', 'destinatario_nome', 'chave', 'situacao', 'motivo'],
+    ordemPadrao: 'data_emissao',
+    direcaoPadrao: 'desc',
+  }));
 
   r.get('/documentos/:chave', rota(async (req, res) => {
     const empresaId = empresaDaRequisicao(req);
@@ -543,10 +655,61 @@ export function criarRotasNFe(): Router {
     'id, nsu, schema_doc, chave, tipo, emitente_nome, valor, data_documento, manifestado',
   ));
 
-  r.get('/log', listagem(
-    'nfe_log', 'id',
-    'id, operacao, url, chave, sucesso, codigo_status, motivo, duracao_ms, criado_em',
-  ));
+  r.get('/log', paginada({
+    tabela: 'nfe_log',
+    colunas: 'id, operacao, url, chave, sucesso, codigo_status, motivo, duracao_ms, criado_em',
+    ordenaveis: {
+      criado_em: 'criado_em', operacao: 'operacao', chave: 'chave', sucesso: 'sucesso',
+      duracao_ms: 'duracao_ms', codigo_status: 'codigo_status', motivo: 'motivo',
+    },
+    busca: ['operacao', 'chave', 'motivo', 'CAST(codigo_status AS CHAR)'],
+    ordemPadrao: 'criado_em',
+    direcaoPadrao: 'desc',
+  }));
+
+  // =========================================================================
+  // Preferências das grades (usuarios.config_listas no b2b admin)
+  // O usuário vem da sessão, nunca de um parâmetro do cliente.
+  // =========================================================================
+  const faltaColuna = (err: any) =>
+    err?.code === 'ER_BAD_FIELD_ERROR'
+      ? 'A coluna nfe_usuarios.config_listas ainda não existe: rode extras/2026-09-21_config_listas.sql.'
+      : err?.message;
+
+  r.get('/config-listas', rota(async (req, res) => {
+    let config: Record<string, unknown> = {};
+    try {
+      const [linhas] = await pool.query<any[]>(
+        'SELECT config_listas FROM nfe_usuarios WHERE id = ? AND empresa_id = ? LIMIT 1',
+        [req.usuario!.id, req.usuario!.empresaId],
+      );
+      config = JSON.parse(linhas[0]?.config_listas || '{}') || {};
+    } catch {
+      // Coluna ainda não criada ou JSON inválido: as grades abrem com o padrão
+    }
+    res.json(config);
+  }));
+
+  r.put('/config-listas', rota(async (req, res) => {
+    const corpo = req.body;
+    if (!corpo || typeof corpo !== 'object' || Array.isArray(corpo)) throw new Error('Configuração inválida.');
+    const texto = JSON.stringify(corpo);
+    if (texto.length > 60000) throw new Error('Configuração muito grande.');
+
+    try {
+      const [resultado] = await pool.query<any>(
+        'UPDATE nfe_usuarios SET config_listas = ? WHERE id = ? AND empresa_id = ?',
+        [texto, req.usuario!.id, req.usuario!.empresaId],
+      );
+      if (!resultado.affectedRows) {
+        res.status(404).json({ success: false, error: 'Usuário da sessão não encontrado.' });
+        return;
+      }
+    } catch (err: any) {
+      throw new Error(faltaColuna(err));
+    }
+    res.json({ success: true });
+  }));
 
   r.get('/log/:id', rota(async (req, res) => {
     const empresaId = empresaDaRequisicao(req);

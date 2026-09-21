@@ -23,12 +23,12 @@ export const pool = mysql.createPool(dbConfig);
  * serverless é o próprio contêiner, e o erro que chega na tela é um
  * ECONNREFUSED sem pista nenhuma da causa real.
  */
-export const CONFIG_FALTANDO = ['MYSQL_HOST', 'MYSQL_USER', 'MYSQL_DATABASE'].filter(
+export const CONFIG_FALTANDO = ['MYSQL_HOST', 'MYSQL_USER', 'MYSQL_DATABASE', 'SESSION_SECRET'].filter(
   (nome) => !process.env[nome],
 );
 
 export const MENSAGEM_CONFIG_FALTANDO =
-  `Banco de dados não configurado: falta definir ${CONFIG_FALTANDO.join(', ')}. ` +
+  `Configuração do servidor incompleta: falta definir ${CONFIG_FALTANDO.join(', ')}. ` +
   'Em execução local isso vem do arquivo .env; na Vercel, de Settings › Environment ' +
   'Variables (e o deploy precisa ser refeito depois de definí-las).';
 

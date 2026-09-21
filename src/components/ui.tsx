@@ -24,21 +24,42 @@ export const Campo: React.FC<CampoProps> = ({ rotulo, children, dica, className 
   </div>
 );
 
+/*
+ * Com rótulo, o className vai para o bloco rótulo + campo, que é quem ocupa a
+ * célula da grade (lg:col-span-*, flex-1, w-24...). No <input> ele não tinha
+ * efeito nenhum e todo campo ficava com uma coluna só.
+ *
+ * Por isso o className é só de layout. Fonte não se muda por ali — o rótulo
+ * herdaria junto. E nem é para mudar: todo campo tem a mesma família, o mesmo
+ * tamanho e o mesmo peso, sem destaque para data, número ou código.
+ */
+
 type TextoProps = React.InputHTMLAttributes<HTMLInputElement> & { rotulo?: string; dica?: string };
 
 export const Texto: React.FC<TextoProps> = ({ rotulo, dica, className = '', ...props }) => {
-  const campo = (
-    <input {...props} className={`${INPUT_CLASS} ${ALTURA_CONTROLE} w-full ${className}`} />
+  const estilo = `${INPUT_CLASS} ${ALTURA_CONTROLE} w-full`;
+  if (!rotulo) {
+    return <input {...props} className={`${estilo} ${className}`} />;
+  }
+  return (
+    <Campo rotulo={rotulo} dica={dica} className={className}>
+      <input {...props} className={estilo} />
+    </Campo>
   );
-  return rotulo ? <Campo rotulo={rotulo} dica={dica}>{campo}</Campo> : campo;
 };
 
 type AreaProps = React.TextareaHTMLAttributes<HTMLTextAreaElement> & { rotulo?: string; dica?: string };
 
 export const Area: React.FC<AreaProps> = ({ rotulo, dica, className = '', ...props }) => {
   // Textarea é a exceção da regra de selecionar tudo ao focar
-  const campo = <textarea {...props} className={`${INPUT_CLASS} w-full resize-y ${className}`} />;
-  return rotulo ? <Campo rotulo={rotulo} dica={dica}>{campo}</Campo> : campo;
+  if (!rotulo) {
+    return <textarea {...props} className={`${INPUT_CLASS} w-full resize-y ${className}`} />;
+  }
+  return (
+    <Campo rotulo={rotulo} dica={dica} className={className}>
+      <textarea {...props} className={`${INPUT_CLASS} w-full resize-y`} />
+    </Campo>
+  );
 };
 
 type SelecaoProps = React.SelectHTMLAttributes<HTMLSelectElement> & {
@@ -48,16 +69,26 @@ type SelecaoProps = React.SelectHTMLAttributes<HTMLSelectElement> & {
 };
 
 export const Selecao: React.FC<SelecaoProps> = ({ rotulo, dica, opcoes, className = '', ...props }) => {
-  const campo = (
-    <select {...props} className={`${INPUT_CLASS} ${ALTURA_CONTROLE} w-full cursor-pointer ${className}`}>
-      {opcoes.map((o) => (
-        <option key={String(o.valor)} value={o.valor}>
-          {o.rotulo}
-        </option>
-      ))}
-    </select>
+  const opcoesRenderizadas = opcoes.map((o) => (
+    <option key={String(o.valor)} value={o.valor}>
+      {o.rotulo}
+    </option>
+  ));
+
+  if (!rotulo) {
+    return (
+      <select {...props} className={`${INPUT_CLASS} ${ALTURA_CONTROLE} w-full cursor-pointer ${className}`}>
+        {opcoesRenderizadas}
+      </select>
+    );
+  }
+  return (
+    <Campo rotulo={rotulo} dica={dica} className={className}>
+      <select {...props} className={`${INPUT_CLASS} ${ALTURA_CONTROLE} w-full cursor-pointer`}>
+        {opcoesRenderizadas}
+      </select>
+    </Campo>
   );
-  return rotulo ? <Campo rotulo={rotulo} dica={dica}>{campo}</Campo> : campo;
 };
 
 // ---------------------------------------------------------------------------
@@ -104,39 +135,66 @@ export const Botao: React.FC<BotaoProps> = ({
 // Blocos de tela
 // ---------------------------------------------------------------------------
 
-export const Secao: React.FC<{ titulo: string; descricao?: string; children: React.ReactNode; acoes?: React.ReactNode }> = ({
-  titulo,
-  descricao,
-  children,
-  acoes,
-}) => (
-  <section className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-xl overflow-hidden">
-    <header className="px-4 py-3 border-b border-stone-200 dark:border-stone-800 flex items-center justify-between gap-3 flex-wrap">
-      <div>
-        <h2 className="text-sm font-bold text-stone-800 dark:text-stone-100">{titulo}</h2>
-        {descricao && <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5">{descricao}</p>}
-      </div>
-      {acoes && <div className="flex items-center gap-2 flex-wrap">{acoes}</div>}
-    </header>
-    <div className="p-4">{children}</div>
-  </section>
-);
+/**
+ * Bloco de conteúdo de uma tela.
+ *
+ * `chapado` (padrão) segue as telas do b2b admin: sem caixa, sem canto arredondado e
+ * sem sombra — o bloco encosta nas bordas da área útil e se separa do próximo por uma
+ * linha, com o título num rótulo pequeno em maiúsculas, como os grupos do RecordForm.
+ * `cartao` é o visual de cartão, reservado ao painel.
+ */
+export const Secao: React.FC<{
+  titulo: string;
+  descricao?: string;
+  children: React.ReactNode;
+  acoes?: React.ReactNode;
+  variante?: 'chapado' | 'cartao';
+}> = ({ titulo, descricao, children, acoes, variante = 'chapado' }) => {
+  if (variante === 'cartao') {
+    return (
+      <section className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-xl overflow-hidden">
+        <header className="px-4 py-3 border-b border-stone-200 dark:border-stone-800 flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="text-sm font-bold text-stone-800 dark:text-stone-100">{titulo}</h2>
+            {descricao && <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5">{descricao}</p>}
+          </div>
+          {acoes && <div className="flex items-center gap-2 flex-wrap">{acoes}</div>}
+        </header>
+        <div className="p-4">{children}</div>
+      </section>
+    );
+  }
 
+  return (
+    <section className="bg-white dark:bg-stone-900 border-b border-stone-200 dark:border-stone-800">
+      <header className="px-4 pt-3 pb-2 flex items-center justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <h2 className="text-[10px] font-semibold uppercase tracking-wider text-stone-400">{titulo}</h2>
+          {descricao && <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5">{descricao}</p>}
+        </div>
+        {acoes && <div className="flex items-center gap-2 flex-wrap">{acoes}</div>}
+      </header>
+      <div className="px-4 pb-4">{children}</div>
+    </section>
+  );
+};
+
+/** Faixa de abas das telas do b2b admin: quadrada, com a aba ativa branca e traço azul */
 export const Abas: React.FC<{
   abas: { id: string; rotulo: string; icone?: React.ReactNode }[];
   ativa: string;
   onTrocar: (id: string) => void;
 }> = ({ abas, ativa, onTrocar }) => (
-  <div className="flex items-end gap-1 overflow-x-auto border-b border-stone-200 dark:border-stone-800">
+  <div className="flex items-stretch bg-stone-100 dark:bg-stone-950 border-b border-stone-200 dark:border-stone-800 overflow-x-auto overflow-y-hidden shrink-0">
     {abas.map((aba) => (
       <button
         key={aba.id}
         type="button"
         onClick={() => onTrocar(aba.id)}
-        className={`px-3 py-2 text-xs font-semibold whitespace-nowrap border-b-2 -mb-px transition-colors cursor-pointer flex items-center gap-1.5 ${
+        className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold whitespace-nowrap border-r border-stone-200 dark:border-stone-800 border-b-2 transition-colors cursor-pointer ${
           ativa === aba.id
-            ? 'border-blue-600 text-blue-700 dark:border-blue-400 dark:text-blue-300'
-            : 'border-transparent text-stone-500 hover:text-stone-800 dark:text-stone-400 dark:hover:text-stone-100'
+            ? 'bg-white dark:bg-stone-900 text-blue-700 dark:text-blue-400 border-b-blue-600'
+            : 'border-b-transparent text-stone-600 dark:text-stone-400 hover:bg-stone-200/60 dark:hover:bg-stone-800/60'
         }`}
       >
         {aba.icone}
@@ -145,6 +203,30 @@ export const Abas: React.FC<{
     ))}
   </div>
 );
+
+/** Aviso em faixa de largura total, chapado como o resto da tela */
+export const Faixa: React.FC<{
+  tom: 'info' | 'sucesso' | 'erro' | 'alerta';
+  children: React.ReactNode;
+  onFechar?: () => void;
+}> = ({ tom, children, onFechar }) => {
+  const cores: Record<string, string> = {
+    info: 'bg-blue-50 dark:bg-blue-950/40 text-blue-800 dark:text-blue-300 border-blue-200 dark:border-blue-900',
+    sucesso: 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900',
+    erro: 'bg-red-50 dark:bg-red-950/40 text-red-800 dark:text-red-300 border-red-200 dark:border-red-900',
+    alerta: 'bg-amber-50 dark:bg-amber-950/30 text-amber-900 dark:text-amber-200 border-amber-200 dark:border-amber-900',
+  };
+  return (
+    <div className={`text-xs px-4 py-2.5 border-b flex items-start justify-between gap-3 ${cores[tom]}`}>
+      <div className="min-w-0 flex-1">{children}</div>
+      {onFechar && (
+        <button type="button" className="font-bold cursor-pointer shrink-0" onClick={onFechar} aria-label="Fechar aviso">
+          ×
+        </button>
+      )}
+    </div>
+  );
+};
 
 /** Diálogo de confirmação do projeto — substitui o window.confirm */
 export const Confirmacao: React.FC<{

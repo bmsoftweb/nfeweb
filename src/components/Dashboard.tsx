@@ -122,7 +122,7 @@ export const Dashboard: React.FC<{
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         <div className="xl:col-span-2">
-          <Secao titulo="Últimos documentos">
+          <Secao titulo="Últimos documentos" variante="cartao">
             {painel.ultimos.length === 0 ? (
               <Vazio mensagem="Nenhuma nota emitida ainda." />
             ) : (
@@ -151,7 +151,7 @@ export const Dashboard: React.FC<{
         </div>
 
         <div className="flex flex-col gap-4">
-          <Secao titulo="Situação do certificado">
+          <Secao titulo="Situação do certificado" variante="cartao">
             {certificado.erro ? (
               <div className="flex items-start gap-2 text-xs text-red-700 dark:text-red-300">
                 <ShieldAlert className="w-4 h-4 shrink-0 mt-px" />
@@ -184,7 +184,7 @@ export const Dashboard: React.FC<{
             </dl>
           </Secao>
 
-          <Secao titulo="Últimas falhas">
+          <Secao titulo="Últimas falhas" variante="cartao">
             {painel.erros.length === 0 ? (
               <Vazio mensagem="Nenhuma falha registrada." />
             ) : (

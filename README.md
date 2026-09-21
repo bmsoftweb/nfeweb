@@ -58,8 +58,29 @@ Dois detalhes que o deploy exige:
   roda como ESM de verdade, onde o especificador sem extensão não resolve.
 
 Variáveis de ambiente a definir no projeto da Vercel (Settings › Environment Variables),
-as mesmas do `.env`: `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD` e
-`MYSQL_DATABASE`. O MySQL precisa aceitar conexão vinda de fora.
+as mesmas do `.env`: `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`,
+`MYSQL_DATABASE` e `SESSION_SECRET`. O MySQL precisa aceitar conexão vinda de fora.
+Use um `SESSION_SECRET` **diferente** do local: o token de um ambiente não deve valer
+no outro. Faltando qualquer uma, a API responde 503 dizendo qual falta.
+
+## Autenticação
+
+O login (`POST /api/login`, CNPJ do emitente + usuário + senha) devolve um **token
+assinado com HMAC-SHA256** ([`server/auth.ts`](server/auth.ts)), no mesmo desenho do
+estoqueWeb. Todo o resto de `/api` exige esse token no header
+`Authorization: Bearer <token>` e responde 401 sem ele.
+
+- A **empresa sai do token**, nunca de um header. Antes o servidor confiava num
+  `x-empresa-id` enviado pelo cliente: quem soubesse a URL podia cancelar notas,
+  inutilizar numeração ou apagar o certificado de qualquer emitente.
+- O token vale **12 horas** e não precisa de tabela: a assinatura com o
+  `SESSION_SECRET` é o que o torna impossível de forjar. Trocar o segredo derruba todas
+  as sessões abertas.
+- O usuário é **relido do banco** a cada requisição (cache de 30 s): desativar o usuário
+  ou o emitente corta o acesso em até meio minuto, sem esperar o token vencer.
+- No navegador, o token fica no `localStorage` com "Lembrar neste dispositivo" e no
+  `sessionStorage` sem ele. A senha nunca é guardada. Um 401 com sessão aberta leva de
+  volta ao login com o motivo.
 
 ## Conferência automática
 

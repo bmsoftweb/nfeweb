@@ -163,6 +163,8 @@ export interface DocumentoLista {
   protocolo: string;
   codigo_status: number;
   motivo: string;
+  /** 1 quando a nota foi gerada aqui e guarda os dados do formulário (pode ser copiada) */
+  copiavel: number;
 }
 
 export interface StatusBanco {

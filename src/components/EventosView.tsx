@@ -46,7 +46,7 @@ export const EventosView: React.FC<{ meta: Meta | null }> = ({ meta }) => {
   };
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col">
       <Secao titulo="Enviar evento" descricao="Cancelamento, carta de correção e manifestação do destinatário">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
           <Selecao
@@ -67,7 +67,7 @@ export const EventosView: React.FC<{ meta: Meta | null }> = ({ meta }) => {
             placeholder="44 dígitos"
             value={chave}
             onChange={(e) => setChave(e.target.value.replace(/\D/g, '').slice(0, 44))}
-            className="lg:col-span-4 font-mono"
+            className="lg:col-span-4"
           />
 
           <Texto
@@ -87,7 +87,7 @@ export const EventosView: React.FC<{ meta: Meta | null }> = ({ meta }) => {
               inputMode="numeric"
               value={protocolo}
               onChange={(e) => setProtocolo(e.target.value.replace(/\D/g, '').slice(0, 15))}
-              className="lg:col-span-4 font-mono"
+              className="lg:col-span-4"
             />
           )}
 

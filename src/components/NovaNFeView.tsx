@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { ArrowLeft, Plus, Save, Send, Trash2 } from 'lucide-react';
 import * as api from '../services/api';
 import { Meta } from '../types';
-import { ALTURA_CONTROLE, Area, Botao, Campo, Confirmacao, Secao, Selecao, Texto, Vazio } from './ui';
+import { ALTURA_CONTROLE, Area, Botao, Campo, Confirmacao, Faixa, Secao, Selecao, Texto, Vazio } from './ui';
 import { Toggle } from './Toggle';
 import { NumberField } from './NumberField';
 import { DateField } from './DateField';
@@ -52,39 +52,126 @@ const hoje = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
+/** Nota de origem do "Novo (copiar)": o número dela e os dados do formulário que a geraram */
+export interface CopiaNFe {
+  numero: number;
+  dados: any;
+}
+
+/** Nota aberta para correção ("Editar"): só assinada ou rejeitada, e regrava o mesmo registro */
+export interface EdicaoNFe {
+  id: number;
+  numero: number;
+  dados: any;
+  /** Retorno da SEFAZ que a rejeitou, mostrado no topo para orientar a correção */
+  rejeicao?: string;
+}
+
+/** Texto para o NumberField, que trabalha com o valor canônico ("1.0000") */
+const decimal = (valor: any, casas: number, padrao: string) =>
+  valor === undefined || valor === null || valor === '' ? padrao : Number(valor).toFixed(casas);
+
+/**
+ * Valores iniciais do formulário. Sem origem, os padrões de uma nota nova; com
+ * origem (cópia ou edição), tudo o que ela tinha. Número e data ficam a cargo de
+ * quem chama: a cópia recomeça, a edição mantém.
+ */
+function valoresIniciais(dados?: any) {
+  const d = dados || {};
+  const ide = d.ide || {};
+  const dest = d.destinatario || {};
+  const end = dest.endereco || {};
+  const texto = (v: any, padrao = '') => (v === undefined || v === null ? padrao : String(v));
+
+  return {
+    naturezaOperacao: texto(ide.naturezaOperacao, 'VENDA DE MERCADORIA'),
+    serie: texto(ide.serie, '1'),
+    tipoDocumento: texto(ide.tipoDocumento, '1'),
+    finalidade: texto(ide.finalidade, '1'),
+    consumidorFinal: Number(ide.consumidorFinal) === 1,
+    presencial: texto(ide.presencial, '1'),
+
+    destDocumento: texto(dest.cnpj || dest.cpf),
+    destNome: texto(dest.nome),
+    destIE: texto(dest.inscricaoEstadual),
+    destIndIE: texto(dest.indIEDest, '9'),
+    destEmail: texto(dest.email),
+    destLogradouro: texto(end.logradouro),
+    destNumero: texto(end.numero),
+    destBairro: texto(end.bairro),
+    destCodMunicipio: texto(end.codigoMunicipio),
+    destMunicipio: texto(end.municipio),
+    destUf: texto(end.uf, 'SP'),
+    destCep: texto(end.cep),
+
+    itens: Array.isArray(d.itens) && d.itens.length
+      ? d.itens.map((i: any): ItemForm => ({
+          codigo: texto(i.codigo),
+          descricao: texto(i.descricao),
+          ncm: texto(i.ncm),
+          cfop: texto(i.cfop, ITEM_VAZIO.cfop),
+          unidade: texto(i.unidade, ITEM_VAZIO.unidade),
+          quantidade: decimal(i.quantidade, 4, ITEM_VAZIO.quantidade),
+          valorUnitario: decimal(i.valorUnitario, 2, ITEM_VAZIO.valorUnitario),
+          origem: texto(i.imposto?.origem, ITEM_VAZIO.origem),
+          cst: texto(i.imposto?.cst, ITEM_VAZIO.cst),
+          csosn: texto(i.imposto?.csosn, ITEM_VAZIO.csosn),
+          aliquotaICMS: decimal(i.imposto?.aliquota, 4, ITEM_VAZIO.aliquotaICMS),
+          cstPis: texto(i.imposto?.pis?.cst, ITEM_VAZIO.cstPis),
+          cstCofins: texto(i.imposto?.cofins?.cst, ITEM_VAZIO.cstCofins),
+        }))
+      : [{ ...ITEM_VAZIO }],
+
+    modalidadeFrete: texto(d.transporte?.modalidadeFrete, '9'),
+    formaPagamento: texto(d.pagamentos?.[0]?.forma, '01'),
+    observacoes: texto(d.informacoesAdicionais?.contribuinte),
+  };
+}
+
 export const NovaNFeView: React.FC<{
   meta: Meta | null;
+  /** Nota de origem quando a tela foi aberta pelo "Novo (copiar)" */
+  copiaDe?: CopiaNFe | null;
+  /** Nota sendo corrigida, quando a tela foi aberta pelo "Editar" */
+  edicao?: EdicaoNFe | null;
   onCancelar: () => void;
   onEmitida: () => void;
-}> = ({ meta, onCancelar, onEmitida }) => {
+}> = ({ meta, copiaDe, edicao, onCancelar, onEmitida }) => {
   const { retorno, erro, errosSchema, carregando, executar, setErro, falhar } = useOperacao();
 
-  const [naturezaOperacao, setNaturezaOperacao] = useState('VENDA DE MERCADORIA');
-  const [serie, setSerie] = useState('1');
-  const [numero, setNumero] = useState('');
-  const [dataEmissao, setDataEmissao] = useState(hoje());
-  const [tipoDocumento, setTipoDocumento] = useState('1');
-  const [finalidade, setFinalidade] = useState('1');
-  const [consumidorFinal, setConsumidorFinal] = useState(false);
-  const [presencial, setPresencial] = useState('1');
+  // Calculado uma vez: a tela nasce preenchida e dali em diante o usuário edita
+  const [inicial] = useState(() => valoresIniciais(edicao?.dados || copiaDe?.dados));
 
-  const [destDocumento, setDestDocumento] = useState('');
-  const [destNome, setDestNome] = useState('');
-  const [destIE, setDestIE] = useState('');
-  const [destIndIE, setDestIndIE] = useState('9');
-  const [destEmail, setDestEmail] = useState('');
-  const [destLogradouro, setDestLogradouro] = useState('');
-  const [destNumero, setDestNumero] = useState('');
-  const [destBairro, setDestBairro] = useState('');
-  const [destCodMunicipio, setDestCodMunicipio] = useState('');
-  const [destMunicipio, setDestMunicipio] = useState('');
-  const [destUf, setDestUf] = useState('SP');
-  const [destCep, setDestCep] = useState('');
+  const [naturezaOperacao, setNaturezaOperacao] = useState(inicial.naturezaOperacao);
+  const [serie, setSerie] = useState(inicial.serie);
+  // Na edição, número e data são os da própria nota; na cópia e na nota nova, recomeçam
+  const [numero, setNumero] = useState(() => (edicao ? String(edicao.dados?.ide?.numero ?? edicao.numero) : ''));
+  const [dataEmissao, setDataEmissao] = useState(() => {
+    const original = edicao?.dados?.ide?.dataEmissao;
+    return typeof original === 'string' && /^\d{4}-\d{2}-\d{2}/.test(original) ? original.slice(0, 10) : hoje();
+  });
+  const [tipoDocumento, setTipoDocumento] = useState(inicial.tipoDocumento);
+  const [finalidade, setFinalidade] = useState(inicial.finalidade);
+  const [consumidorFinal, setConsumidorFinal] = useState(inicial.consumidorFinal);
+  const [presencial, setPresencial] = useState(inicial.presencial);
 
-  const [itens, setItens] = useState<ItemForm[]>([{ ...ITEM_VAZIO }]);
-  const [modalidadeFrete, setModalidadeFrete] = useState('9');
-  const [formaPagamento, setFormaPagamento] = useState('01');
-  const [observacoes, setObservacoes] = useState('');
+  const [destDocumento, setDestDocumento] = useState(inicial.destDocumento);
+  const [destNome, setDestNome] = useState(inicial.destNome);
+  const [destIE, setDestIE] = useState(inicial.destIE);
+  const [destIndIE, setDestIndIE] = useState(inicial.destIndIE);
+  const [destEmail, setDestEmail] = useState(inicial.destEmail);
+  const [destLogradouro, setDestLogradouro] = useState(inicial.destLogradouro);
+  const [destNumero, setDestNumero] = useState(inicial.destNumero);
+  const [destBairro, setDestBairro] = useState(inicial.destBairro);
+  const [destCodMunicipio, setDestCodMunicipio] = useState(inicial.destCodMunicipio);
+  const [destMunicipio, setDestMunicipio] = useState(inicial.destMunicipio);
+  const [destUf, setDestUf] = useState(inicial.destUf);
+  const [destCep, setDestCep] = useState(inicial.destCep);
+
+  const [itens, setItens] = useState<ItemForm[]>(inicial.itens);
+  const [modalidadeFrete, setModalidadeFrete] = useState(inicial.modalidadeFrete);
+  const [formaPagamento, setFormaPagamento] = useState(inicial.formaPagamento);
+  const [observacoes, setObservacoes] = useState(inicial.observacoes);
 
   const [chaveGerada, setChaveGerada] = useState('');
   const [confirmandoEnvio, setConfirmandoEnvio] = useState(false);
@@ -171,7 +258,8 @@ export const NovaNFeView: React.FC<{
   const gerar = async () => {
     setErro(null);
     try {
-      const resposta = await api.gerarNFe(montarDocumento());
+      // Na edição o servidor regrava a mesma linha, em vez de criar uma segunda nota
+      const resposta = await api.gerarNFe(montarDocumento(), edicao?.id);
       setChaveGerada(resposta.chave);
     } catch (err: any) {
       // Sem chave, o "Transmitir" volta a ficar bloqueado até gerar um XML válido
@@ -189,13 +277,34 @@ export const NovaNFeView: React.FC<{
   const valido = numero && naturezaOperacao && itens.every((i) => i.descricao && i.ncm && i.cfop);
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-3">
+    <div className="flex flex-col">
+      {/* Barra de ferramentas encostada no topo, como no b2b admin */}
+      <div className="px-4 py-2.5 border-b border-stone-200 dark:border-stone-800 flex items-center gap-3">
         <Botao icone={<ArrowLeft className="w-3.5 h-3.5" />} onClick={onCancelar}>
           Voltar
         </Botao>
-        <h2 className="text-sm font-bold text-stone-800 dark:text-stone-100">Nova NF-e</h2>
+        <h2 className="text-sm font-bold text-stone-800 dark:text-stone-100">
+          {edicao ? `Editar NF-e nº ${edicao.numero}` : 'Nova NF-e'}
+          {copiaDe && !edicao && (
+            <span className="ml-2 font-medium text-stone-500 dark:text-stone-400">
+              — cópia da nº {copiaDe.numero}
+            </span>
+          )}
+        </h2>
       </div>
+
+      {edicao && (
+        <Faixa tom="alerta">
+          {edicao.rejeicao ? (
+            <div className="flex flex-col gap-1">
+              <span className="font-semibold">Rejeitada pela SEFAZ: {edicao.rejeicao}</span>
+              <span>Corrija o que for preciso, gere o XML de novo e transmita. A nota continua sendo a mesma na lista.</span>
+            </div>
+          ) : (
+            <span>Nota assinada e ainda não enviada. Ao gerar de novo, o XML anterior é substituído.</span>
+          )}
+        </Faixa>
+      )}
 
       <Secao titulo="Identificação">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
@@ -221,6 +330,7 @@ export const NovaNFeView: React.FC<{
             inputMode="numeric"
             value={numero}
             onChange={(e) => setNumero(e.target.value.replace(/\D/g, ''))}
+            dica={copiaDe ? `A copiada era a nº ${copiaDe.numero}` : undefined}
             className="lg:col-span-2"
           />
           <Campo rotulo="Data de emissão" className="lg:col-span-2">
@@ -302,7 +412,7 @@ export const NovaNFeView: React.FC<{
             inputMode="numeric"
             value={destDocumento}
             onChange={(e) => setDestDocumento(e.target.value.replace(/\D/g, '').slice(0, 14))}
-            className="lg:col-span-3 font-mono"
+            className="lg:col-span-3"
           />
           <Texto
             rotulo="Nome / Razão social"
@@ -329,7 +439,7 @@ export const NovaNFeView: React.FC<{
               inputMode="numeric"
               value={destIE}
               onChange={(e) => setDestIE(e.target.value.replace(/\D/g, ''))}
-              className="lg:col-span-3 font-mono"
+              className="lg:col-span-3"
             />
           )}
           <Texto
@@ -363,7 +473,7 @@ export const NovaNFeView: React.FC<{
             inputMode="numeric"
             value={destCodMunicipio}
             onChange={(e) => setDestCodMunicipio(e.target.value.replace(/\D/g, '').slice(0, 7))}
-            className="lg:col-span-3 font-mono"
+            className="lg:col-span-3"
           />
           <Texto
             rotulo="Município"
@@ -383,7 +493,7 @@ export const NovaNFeView: React.FC<{
             inputMode="numeric"
             value={destCep}
             onChange={(e) => setDestCep(e.target.value.replace(/\D/g, '').slice(0, 8))}
-            className="lg:col-span-3 font-mono"
+            className="lg:col-span-3"
           />
         </div>
       </Secao>
@@ -404,7 +514,7 @@ export const NovaNFeView: React.FC<{
             {itens.map((item, indice) => (
               <div
                 key={indice}
-                className="border border-stone-200 dark:border-stone-800 rounded-lg p-3 grid grid-cols-1 lg:grid-cols-12 gap-3"
+                className="border border-stone-200 dark:border-stone-800 p-3 grid grid-cols-1 lg:grid-cols-12 gap-3"
               >
                 <Texto
                   rotulo="Código"
@@ -425,7 +535,7 @@ export const NovaNFeView: React.FC<{
                   inputMode="numeric"
                   value={item.ncm}
                   onChange={(e) => alterarItem(indice, 'ncm', e.target.value.replace(/\D/g, '').slice(0, 8))}
-                  className="lg:col-span-2 font-mono"
+                  className="lg:col-span-2"
                 />
                 <Texto
                   rotulo="CFOP"
@@ -433,7 +543,7 @@ export const NovaNFeView: React.FC<{
                   inputMode="numeric"
                   value={item.cfop}
                   onChange={(e) => alterarItem(indice, 'cfop', e.target.value.replace(/\D/g, '').slice(0, 4))}
-                  className="lg:col-span-1 font-mono"
+                  className="lg:col-span-1"
                 />
                 <Texto
                   rotulo="Un."
@@ -479,13 +589,13 @@ export const NovaNFeView: React.FC<{
                   rotulo="CST ICMS"
                   value={item.cst}
                   onChange={(e) => alterarItem(indice, 'cst', e.target.value.replace(/\D/g, '').slice(0, 2))}
-                  className="lg:col-span-1 font-mono"
+                  className="lg:col-span-1"
                 />
                 <Texto
                   rotulo="CSOSN"
                   value={item.csosn}
                   onChange={(e) => alterarItem(indice, 'csosn', e.target.value.replace(/\D/g, '').slice(0, 3))}
-                  className="lg:col-span-1 font-mono"
+                  className="lg:col-span-1"
                 />
                 <Campo rotulo="Alíq. ICMS %" className="lg:col-span-1">
                   <NumberField
@@ -498,13 +608,13 @@ export const NovaNFeView: React.FC<{
                   rotulo="CST PIS"
                   value={item.cstPis}
                   onChange={(e) => alterarItem(indice, 'cstPis', e.target.value.replace(/\D/g, '').slice(0, 2))}
-                  className="lg:col-span-1 font-mono"
+                  className="lg:col-span-1"
                 />
                 <Texto
                   rotulo="CST COFINS"
                   value={item.cstCofins}
                   onChange={(e) => alterarItem(indice, 'cstCofins', e.target.value.replace(/\D/g, '').slice(0, 2))}
-                  className="lg:col-span-1 font-mono"
+                  className="lg:col-span-1"
                 />
               </div>
             ))}

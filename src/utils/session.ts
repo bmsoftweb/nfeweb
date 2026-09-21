@@ -3,11 +3,13 @@ import { Emitente, Usuario } from '../types';
 /**
  * Sessão e "Lembrar neste dispositivo", no mesmo desenho do painel B2B:
  * marcado grava no localStorage, desmarcado no sessionStorage. A senha nunca
- * é guardada.
+ * é guardada; o que autentica as chamadas é o token do login, que vence em 12 horas.
  */
 
 const SESSAO_USUARIO = 'nfeweb_session_user';
 const SESSAO_EMPRESA = 'nfeweb_session_empresa';
+const SESSAO_TOKEN = 'nfeweb_session_token';
+const CHAVES_SESSAO = [SESSAO_USUARIO, SESSAO_EMPRESA, SESSAO_TOKEN];
 const LEMBRETE = 'nfeweb_lembrar_dispositivo';
 
 export interface LembreteLogin {
@@ -31,29 +33,33 @@ function lerJson<T>(chave: string): T | null {
   }, null);
 }
 
-export function lerSessao(): { usuario: Usuario | null; empresa: Emitente | null } {
+export function lerSessao(): { usuario: Usuario | null; empresa: Emitente | null; token: string | null } {
+  const token = lerJson<string>(SESSAO_TOKEN);
+  // Sessão guardada antes da autenticação existir não tem token: vale como deslogado
+  if (!token) return { usuario: null, empresa: null, token: null };
   return {
     usuario: lerJson<Usuario>(SESSAO_USUARIO),
     empresa: lerJson<Emitente>(SESSAO_EMPRESA),
+    token,
   };
 }
 
-export function salvarSessao(usuario: Usuario, empresa: Emitente, lembrar: boolean) {
+export function salvarSessao(usuario: Usuario, empresa: Emitente, token: string, lembrar: boolean) {
   seguro(() => {
     const destino = lembrar ? localStorage : sessionStorage;
     const outro = lembrar ? sessionStorage : localStorage;
     destino.setItem(SESSAO_USUARIO, JSON.stringify(usuario));
     destino.setItem(SESSAO_EMPRESA, JSON.stringify(empresa));
-    outro.removeItem(SESSAO_USUARIO);
-    outro.removeItem(SESSAO_EMPRESA);
+    destino.setItem(SESSAO_TOKEN, JSON.stringify(token));
+    // Evita que sobre uma cópia no armazenamento que não foi escolhido
+    for (const chave of CHAVES_SESSAO) outro.removeItem(chave);
   }, undefined);
 }
 
 export function limparSessao() {
   seguro(() => {
     for (const s of [localStorage, sessionStorage]) {
-      s.removeItem(SESSAO_USUARIO);
-      s.removeItem(SESSAO_EMPRESA);
+      for (const chave of CHAVES_SESSAO) s.removeItem(chave);
     }
   }, undefined);
 }

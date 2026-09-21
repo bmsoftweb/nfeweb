@@ -3,6 +3,7 @@ import { CertificadoInfo, Emitente, Meta, Painel, StatusBanco, Usuario } from '.
 import * as api from './services/api';
 import { ThemeMode, applyTheme, getInitialTheme } from './utils/theme';
 import { lerSessao, limparSessao, salvarSessao } from './utils/session';
+import { limparConfigListas } from './utils/configListas';
 import { MENU, Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { LoginView } from './components/LoginView';
@@ -37,10 +38,16 @@ export default function App() {
   // ---------------------------------------------------------------
   // Sessão
   // ---------------------------------------------------------------
-  const [usuario, setUsuario] = useState<Usuario | null>(() => lerSessao().usuario);
-  const [emitente, setEmitente] = useState<Emitente | null>(() => lerSessao().empresa);
-
-  useEffect(() => { api.definirEmpresa(emitente?.id ?? null); }, [emitente?.id]);
+  const [sessaoSalva] = useState(() => {
+    const salva = lerSessao();
+    // O token precisa estar no cliente HTTP antes das primeiras chamadas do painel
+    api.definirToken(salva.token);
+    return salva;
+  });
+  const [usuario, setUsuario] = useState<Usuario | null>(sessaoSalva.usuario);
+  const [emitente, setEmitente] = useState<Emitente | null>(sessaoSalva.empresa);
+  /** Motivo mostrado na tela de login quando a sessão expira ou é revogada */
+  const [avisoLogin, setAvisoLogin] = useState<string | null>(null);
 
   // ---------------------------------------------------------------
   // Estado geral
@@ -79,20 +86,32 @@ export default function App() {
     setMeta(null);
     setCertificado(null);
     setAbaAtiva('painel');
-    api.definirEmpresa(null);
+    api.definirToken(null);
+    // As preferências das grades são do usuário que saiu
+    limparConfigListas();
     limparSessao();
   }, []);
+
+  // Token vencido (12 h) ou acesso revogado: o servidor responde 401 e volta ao login
+  useEffect(() => {
+    api.aoExpirarSessao((mensagem) => {
+      sair();
+      setAvisoLogin(mensagem);
+    });
+  }, [sair]);
 
   if (!usuario || !emitente) {
     return (
       <LoginView
         tema={tema}
         onAlternarTema={alternarTema}
-        onEntrou={(novoUsuario, novaEmpresa, lembrar) => {
-          api.definirEmpresa(novaEmpresa.id);
+        avisoInicial={avisoLogin}
+        onEntrou={(novoUsuario, novaEmpresa, token, lembrar) => {
+          api.definirToken(token);
           setUsuario(novoUsuario);
           setEmitente(novaEmpresa);
-          salvarSessao(novoUsuario, novaEmpresa, lembrar);
+          salvarSessao(novoUsuario, novaEmpresa, token, lembrar);
+          setAvisoLogin(null);
           setAbaAtiva('painel');
         }}
       />
@@ -135,11 +154,16 @@ export default function App() {
           onAbrirMenuMobile={() => setMenuMobile(true)}
         />
 
-        <main className="flex-1 overflow-y-auto min-h-0">
-          <div className="px-4 sm:px-6 py-5">
-            {abaAtiva === 'painel' && (
+        {abaAtiva === 'painel' ? (
+          // O painel é o único com margem e cartões
+          <main className="flex-1 overflow-y-auto min-h-0">
+            <div className="px-4 sm:px-6 py-5">
               <Dashboard painel={painel} statusBanco={statusBanco} onNavegar={setAbaAtiva} />
-            )}
+            </div>
+          </main>
+        ) : (
+          // As demais telas seguem o b2b admin: ocupam toda a área útil, chapadas, sem margem
+          <main className="flex-1 flex flex-col overflow-y-auto min-h-0 bg-white dark:bg-stone-900">
             {abaAtiva === 'documentos' && (
               <DocumentosView meta={meta} onRecarregarPainel={recarregar} />
             )}
@@ -153,8 +177,8 @@ export default function App() {
             {abaAtiva === 'distribuicao' && <DistribuicaoView meta={meta} />}
             {abaAtiva === 'configuracoes' && <ConfiguracoesView meta={meta} onSalvou={recarregar} />}
             {abaAtiva === 'log' && <LogView />}
-          </div>
-        </main>
+          </main>
+        )}
       </div>
     </div>
   );

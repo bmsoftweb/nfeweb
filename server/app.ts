@@ -6,6 +6,7 @@ import { pool, checkDbHealth, CONFIG_FALTANDO, MENSAGEM_CONFIG_FALTANDO } from '
 import { criarRotasNFe } from './rotas/nfe.js';
 import { carregarCertificado } from './nfe/contexto.js';
 import { lerConfig } from './config.js';
+import { criarToken, exigirSessao } from './auth.js';
 
 
 /** Aceita bcrypt e os formatos legados que ainda aparecem em bases antigas */
@@ -102,11 +103,18 @@ export function createApp() {
       }
 
       delete encontrado.senha_hash;
-      res.json({ success: true, usuario: encontrado, empresa });
+      // O token é a credencial das próximas chamadas: é dele que sai a empresa
+      const token = criarToken(Number(encontrado.id), Number(empresa.id));
+      res.json({ success: true, token, usuario: encontrado, empresa });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
   });
+
+  // =========================================================================
+  // Daqui para baixo tudo exige sessão: só o login acima é público
+  // =========================================================================
+  app.use('/api', exigirSessao);
 
   // =========================================================================
   // Painel
@@ -117,8 +125,7 @@ export function createApp() {
 
   app.get('/api/painel', async (req: Request, res: Response) => {
     try {
-      const empresaId = Number(req.header('x-empresa-id'));
-      if (!empresaId) return res.status(400).json({ error: 'Sessão sem empresa.' });
+      const empresaId = req.usuario!.empresaId;
 
       const [[contagens]] = await pool.query<any[]>(
         `SELECT
