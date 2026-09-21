@@ -5,7 +5,7 @@
  * abas do formulário original: Geral, WebService, Arquivos, Documento Auxiliar
  * e Email. O certificado tem tabela própria, porque o .pfx é binário.
  */
-import { pool } from './db';
+import { pool } from './db.js';
 
 export interface ConfigGeral {
   /** 1=Normal, 2=Contingência FS-IA, 4=EPEC, 5=FS-DA, 6=SVC-AN, 7=SVC-RS, 9=Offline */

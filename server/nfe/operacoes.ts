@@ -6,9 +6,9 @@
  * transmite pelo SOAP e devolve um retorno já digerido (cStat, xMotivo, XML).
  */
 import zlib from 'zlib';
-import { Contexto, registrarLog } from './contexto';
-import { assinar } from './assinatura';
-import { enviarSoap } from './soap';
+import { Contexto, registrarLog } from './contexto.js';
+import { assinar } from './assinatura.js';
+import { enviarSoap } from './soap.js';
 import {
   Ambiente,
   CODIGO_UF,
@@ -17,11 +17,11 @@ import {
   resolverServico,
   VERSAO_LAYOUT,
   ufPorCodigo,
-} from './servicos';
-import { DECLARACAO, NS_NFE, lerXml, limparTexto, recortarElemento, semDeclaracao, tag, valorTag } from './xml';
-import { dataHoraDFe, agora } from './datas';
-import { acharTipoEvento, COND_USO_CCE } from './eventos';
-import { chaveValida, lerChave } from './chave';
+} from './servicos.js';
+import { DECLARACAO, NS_NFE, lerXml, limparTexto, recortarElemento, semDeclaracao, tag, valorTag } from './xml.js';
+import { dataHoraDFe, agora } from './datas.js';
+import { acharTipoEvento, COND_USO_CCE } from './eventos.js';
+import { chaveValida, lerChave } from './chave.js';
 
 export interface Retorno {
   sucesso: boolean;

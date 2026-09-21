@@ -6,11 +6,11 @@
  * Rode com:  npx tsx server/nfe/autoteste.ts
  */
 import assert from 'assert';
-import { chaveValida, cnpjValido, cpfValido, digitoChave, lerChave, montarChave } from './chave';
-import { resolverDistribuicaoDFe, resolverServico, ufPorCodigo } from './servicos';
-import { grupo, limparTexto, num, tag } from './xml';
-import { somarTotais } from './gerarNFe';
-import { anoMesChave, dataHoraDFe } from './datas';
+import { chaveValida, cnpjValido, cpfValido, digitoChave, lerChave, montarChave } from './chave.js';
+import { resolverDistribuicaoDFe, resolverServico, ufPorCodigo } from './servicos.js';
+import { grupo, limparTexto, num, tag } from './xml.js';
+import { somarTotais } from './gerarNFe.js';
+import { anoMesChave, dataHoraDFe } from './datas.js';
 
 function conferir(nome: string, fn: () => void) {
   fn();

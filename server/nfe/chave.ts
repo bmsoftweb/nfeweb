@@ -5,8 +5,8 @@
  * tpEmis(1) cNF(8) cDV(1). O dígito final é módulo 11 com pesos 2..9 girando
  * da direita para a esquerda, igual ao ACBrValidador.
  */
-import { CODIGO_UF } from './servicos';
-import { anoMesChave } from './datas';
+import { CODIGO_UF } from './servicos.js';
+import { anoMesChave } from './datas.js';
 
 export function digitoChave(chave43: string): number {
   const digitos = chave43.replace(/\D/g, '');

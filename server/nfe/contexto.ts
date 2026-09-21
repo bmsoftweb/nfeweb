@@ -3,11 +3,11 @@
  * certificado da empresa. O certificado fica em cache na memória porque abrir o
  * PKCS#12 custa caro e ele só muda quando é trocado na tela.
  */
-import { pool } from '../db';
-import { ConfigNFe, lerConfig } from '../config';
-import { carregarPfx, CertificadoCarregado } from './certificado';
-import { ModeloDFe } from './servicos';
-import { dataHoraMysql } from './datas';
+import { pool } from '../db.js';
+import { ConfigNFe, lerConfig } from '../config.js';
+import { carregarPfx, CertificadoCarregado } from './certificado.js';
+import { ModeloDFe } from './servicos.js';
+import { dataHoraMysql } from './datas.js';
 
 export interface Emitente {
   id: number;

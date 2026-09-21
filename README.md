@@ -28,12 +28,38 @@ npm run dev
 
 Sobe em <http://localhost:3000>. Para mudar a porta, defina `PORT`.
 
-Build de produção:
+Build de produção (servidor próprio, Express dando `listen`):
 
 ```bash
-npm run build
+npm run build:node
 npm start
 ```
+
+## Deploy na Vercel
+
+O app é servido em duas metades, como no estoqueWeb:
+
+- o front é estático, gerado por `npm run build` em `dist/`;
+- as rotas `/api/*` são uma função serverless: [`api/index.ts`](api/index.ts) exporta o
+  mesmo app Express montado em [`server/app.ts`](server/app.ts), e o
+  [`vercel.json`](vercel.json) reescreve `/api/:path*` para ela.
+
+Por isso `server/app.ts` só monta as rotas — quem dá `listen` e acrescenta o Vite é o
+`server.ts`, usado apenas na execução local.
+
+Dois detalhes que o deploy exige:
+
+- **`includeFiles: "recursos/**"`** no `vercel.json`. Os endereços da SEFAZ e as raízes
+  de certificação são lidos do disco, e arquivos que ninguém importa não entram no
+  pacote da função sozinhos. [`server/nfe/recursos.ts`](server/nfe/recursos.ts) procura
+  a pasta tanto pelo diretório de trabalho quanto a partir do próprio módulo, que é o
+  único ponto de referência garantido em `/var/task`.
+- **Imports relativos com `.js`** em todo o código de servidor. Em produção o módulo
+  roda como ESM de verdade, onde o especificador sem extensão não resolve.
+
+Variáveis de ambiente a definir no projeto da Vercel (Settings › Environment Variables),
+as mesmas do `.env`: `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD` e
+`MYSQL_DATABASE`. O MySQL precisa aceitar conexão vinda de fora.
 
 ## Conferência automática
 

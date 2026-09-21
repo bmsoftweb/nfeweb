@@ -8,11 +8,11 @@
  * chamador informar total já rendeu rejeição 610 demais vezes.
  */
 import crypto from 'crypto';
-import { Contexto } from './contexto';
-import { montarChave } from './chave';
-import { CODIGO_UF, urlsConsulta } from './servicos';
-import { dataHoraDFe, agora } from './datas';
-import { DECLARACAO, NS_NFE, grupo, grupoObrigatorio, limparTexto, num, tag } from './xml';
+import { Contexto } from './contexto.js';
+import { montarChave } from './chave.js';
+import { CODIGO_UF, urlsConsulta } from './servicos.js';
+import { dataHoraDFe, agora } from './datas.js';
+import { DECLARACAO, NS_NFE, grupo, grupoObrigatorio, limparTexto, num, tag } from './xml.js';
 
 // ---------------------------------------------------------------------------
 // Entrada

@@ -4,19 +4,19 @@
  * painel administrativo do B2B.
  */
 import { Request, Response, Router } from 'express';
-import { pool } from '../db';
-import { CONFIG_PADRAO, gravarConfig, lerConfig, preservarSegredos, semSegredos } from '../config';
-import { carregarCertificado, esquecerCertificado, montarContexto, carregarEmitente } from '../nfe/contexto';
-import { carregarPfx } from '../nfe/certificado';
-import { assinar, conferirAssinatura } from '../nfe/assinatura';
-import { gerarNFe } from '../nfe/gerarNFe';
-import { gerarDanfe } from '../nfe/danfe';
-import { enviarEmail, testarSmtp } from '../nfe/email';
-import { TIPOS_EVENTO } from '../nfe/eventos';
-import { UFS } from '../nfe/servicos';
-import { chaveValida } from '../nfe/chave';
-import { dataHoraMysql, paraBR } from '../nfe/datas';
-import { recortarElemento, semDeclaracao, valorTag } from '../nfe/xml';
+import { pool } from '../db.js';
+import { CONFIG_PADRAO, gravarConfig, lerConfig, preservarSegredos, semSegredos } from '../config.js';
+import { carregarCertificado, esquecerCertificado, montarContexto, carregarEmitente } from '../nfe/contexto.js';
+import { carregarPfx } from '../nfe/certificado.js';
+import { assinar, conferirAssinatura } from '../nfe/assinatura.js';
+import { gerarNFe } from '../nfe/gerarNFe.js';
+import { gerarDanfe } from '../nfe/danfe.js';
+import { enviarEmail, testarSmtp } from '../nfe/email.js';
+import { TIPOS_EVENTO } from '../nfe/eventos.js';
+import { UFS } from '../nfe/servicos.js';
+import { chaveValida } from '../nfe/chave.js';
+import { dataHoraMysql, paraBR } from '../nfe/datas.js';
+import { recortarElemento, semDeclaracao, valorTag } from '../nfe/xml.js';
 import {
   autorizar,
   consultarCadastro,
@@ -27,7 +27,7 @@ import {
   inutilizar,
   montarProcNFe,
   statusServico,
-} from '../nfe/operacoes';
+} from '../nfe/operacoes.js';
 
 function empresaDaRequisicao(req: Request): number {
   const id = Number(req.header('x-empresa-id'));

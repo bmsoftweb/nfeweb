@@ -13,7 +13,7 @@
  * Só a versão 4.00 do layout é atendida — é a única em vigor.
  */
 import fs from 'fs';
-import path from 'path';
+import { arquivoRecurso } from './recursos.js';
 
 export type Ambiente = 1 | 2; // 1=Produção, 2=Homologação
 export type ModeloDFe = 'NFe' | 'NFCe';
@@ -53,16 +53,11 @@ type Secoes = Record<string, Record<string, string>>;
 let cacheSecoes: Secoes | null = null;
 
 function arquivoIni(): string {
-  // Em desenvolvimento roda a partir da raiz do projeto; no build empacotado o
-  // server.cjs fica em dist/, e a pasta recursos continua ao lado dele.
-  const candidatos = [
-    path.join(process.cwd(), 'recursos', 'ACBrNFeServicos.ini'),
-    path.join(process.cwd(), '..', 'recursos', 'ACBrNFeServicos.ini'),
-  ];
-  const achado = candidatos.find((c) => fs.existsSync(c));
+  const achado = arquivoRecurso('ACBrNFeServicos.ini');
   if (!achado) {
     throw new Error(
-      'recursos/ACBrNFeServicos.ini não encontrado. Ele vem do ACBr e é a fonte das URLs da SEFAZ.',
+      'recursos/ACBrNFeServicos.ini não encontrado. Ele vem do ACBr e é a fonte das URLs da SEFAZ. ' +
+        'Em deploy serverless, confira o includeFiles do vercel.json.',
     );
   }
   return achado;

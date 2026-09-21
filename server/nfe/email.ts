@@ -3,8 +3,8 @@
  * ACBrMail. O XML vai sempre anexado; o PDF do DANFE, quando gerado.
  */
 import nodemailer from 'nodemailer';
-import { ConfigEmail } from '../config';
-import { paraBR } from './datas';
+import { ConfigEmail } from '../config.js';
+import { paraBR } from './datas.js';
 
 export interface Anexo {
   nome: string;

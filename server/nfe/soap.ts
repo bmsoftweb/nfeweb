@@ -13,8 +13,9 @@ import path from 'path';
 import tls from 'tls';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { URL } from 'url';
-import type { CertificadoCarregado } from './certificado';
-import { ServicoResolvido } from './servicos';
+import type { CertificadoCarregado } from './certificado.js';
+import { ServicoResolvido } from './servicos.js';
+import { pastaRecursos } from './recursos.js';
 
 /**
  * Autoridades confiáveis para validar o servidor da SEFAZ.
@@ -32,19 +33,15 @@ let cacheAutoridades: string[] | null = null;
 function autoridades(): string[] {
   if (cacheAutoridades) return cacheAutoridades;
 
-  const pastas = [
-    path.join(process.cwd(), 'recursos', 'cadeias'),
-    path.join(process.cwd(), '..', 'recursos', 'cadeias'),
-  ];
-
   const extras: string[] = [];
-  for (const pasta of pastas) {
-    if (!fs.existsSync(pasta)) continue;
+  const base = pastaRecursos();
+  const pasta = base ? path.join(base, 'cadeias') : null;
+
+  if (pasta && fs.existsSync(pasta)) {
     for (const arquivo of fs.readdirSync(pasta)) {
       if (!/\.(crt|pem|cer)$/i.test(arquivo)) continue;
       extras.push(fs.readFileSync(path.join(pasta, arquivo), 'utf8'));
     }
-    break;
   }
 
   // As CAs padrão continuam valendo: as extras somam, não substituem

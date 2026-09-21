@@ -8,8 +8,8 @@
  */
 import PDFDocument from 'pdfkit';
 import bwipjs from 'bwip-js/node';
-import { lerXml, valorTag } from './xml';
-import { paraBR } from './datas';
+import { lerXml, valorTag } from './xml.js';
+import { paraBR } from './datas.js';
 
 const MM = 2.834645669; // 1 mm em pontos
 const CINZA = '#444444';

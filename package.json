@@ -1,16 +1,17 @@
 {
   "name": "nfeweb",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
-    "start": "node dist/server.cjs",
+    "build": "vite build",
+    "start": "node dist-node/server.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "teste": "tsx server/nfe/autoteste.ts && tsx server/nfe/autoteste-emissao.ts"
+    "teste": "tsx server/nfe/autoteste.ts && tsx server/nfe/autoteste-emissao.ts",
+    "build:node": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist-node/server.cjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",

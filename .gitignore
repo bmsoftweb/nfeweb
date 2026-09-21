@@ -4,3 +4,4 @@ dist
 /arquivos
 *.pfx
 *.p12
+dist-node

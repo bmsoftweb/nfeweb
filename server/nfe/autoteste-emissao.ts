@@ -9,14 +9,14 @@
  */
 import assert from 'assert';
 import forge from 'node-forge';
-import { CertificadoCarregado } from './certificado';
-import { Contexto } from './contexto';
-import { assinar, conferirAssinatura } from './assinatura';
-import { gerarNFe } from './gerarNFe';
-import { gerarDanfe } from './danfe';
-import { CONFIG_PADRAO } from '../config';
-import { chaveValida } from './chave';
-import { semDeclaracao } from './xml';
+import { CertificadoCarregado } from './certificado.js';
+import { Contexto } from './contexto.js';
+import { assinar, conferirAssinatura } from './assinatura.js';
+import { gerarNFe } from './gerarNFe.js';
+import { gerarDanfe } from './danfe.js';
+import { CONFIG_PADRAO } from '../config.js';
+import { chaveValida } from './chave.js';
+import { semDeclaracao } from './xml.js';
 
 function conferir(nome: string, fn: () => void | Promise<void>) {
   return Promise.resolve(fn()).then(() => console.log(`  ok  ${nome}`));
