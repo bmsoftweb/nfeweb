@@ -1,0 +1,523 @@
+/**
+ * Rotas da API. Cada uma corresponde a um botão do formulário do exemplo
+ * Delphi; o isolamento por empresa vem do header `x-empresa-id`, como no
+ * painel administrativo do B2B.
+ */
+import { Request, Response, Router } from 'express';
+import { pool } from '../db';
+import { CONFIG_PADRAO, gravarConfig, lerConfig, preservarSegredos, semSegredos } from '../config';
+import { carregarCertificado, esquecerCertificado, montarContexto, carregarEmitente } from '../nfe/contexto';
+import { carregarPfx } from '../nfe/certificado';
+import { assinar, conferirAssinatura } from '../nfe/assinatura';
+import { gerarNFe } from '../nfe/gerarNFe';
+import { gerarDanfe } from '../nfe/danfe';
+import { enviarEmail, testarSmtp } from '../nfe/email';
+import { TIPOS_EVENTO } from '../nfe/eventos';
+import { UFS } from '../nfe/servicos';
+import { chaveValida } from '../nfe/chave';
+import { dataHoraMysql, paraBR } from '../nfe/datas';
+import { recortarElemento, semDeclaracao, valorTag } from '../nfe/xml';
+import {
+  autorizar,
+  consultarCadastro,
+  consultarChave,
+  consultarRecibo,
+  distribuicaoDFe,
+  enviarEvento,
+  inutilizar,
+  montarProcNFe,
+  statusServico,
+} from '../nfe/operacoes';
+
+function empresaDaRequisicao(req: Request): number {
+  const id = Number(req.header('x-empresa-id'));
+  if (!id) throw new Error('Sessão sem empresa. Entre novamente.');
+  return id;
+}
+
+/** Envolve o handler para que toda exceção vire um 400 com a mensagem em português */
+function rota(handler: (req: Request, res: Response) => Promise<any>) {
+  return async (req: Request, res: Response) => {
+    try {
+      await handler(req, res);
+    } catch (err: any) {
+      if (!res.headersSent) {
+        res.status(400).json({ success: false, error: err?.message || String(err) });
+      }
+    }
+  };
+}
+
+export function criarRotasNFe(): Router {
+  const r = Router();
+
+  // =========================================================================
+  // Metadados das telas
+  // =========================================================================
+  r.get('/meta', (_req, res) => {
+    res.json({
+      ufs: UFS,
+      tiposEvento: TIPOS_EVENTO,
+      configPadrao: CONFIG_PADRAO,
+      formasEmissao: [
+        { valor: 1, rotulo: 'Normal' },
+        { valor: 2, rotulo: 'Contingência FS-IA' },
+        { valor: 4, rotulo: 'EPEC' },
+        { valor: 5, rotulo: 'Contingência FS-DA' },
+        { valor: 6, rotulo: 'SVC-AN' },
+        { valor: 7, rotulo: 'SVC-RS' },
+        { valor: 9, rotulo: 'Offline (NFC-e)' },
+      ],
+      modelos: [
+        { valor: '55', rotulo: '55 — NF-e' },
+        { valor: '65', rotulo: '65 — NFC-e' },
+      ],
+    });
+  });
+
+  // =========================================================================
+  // Configurações e emitente
+  // =========================================================================
+  r.get('/config', rota(async (req, res) => {
+    const empresaId = empresaDaRequisicao(req);
+    const [config, emitente] = await Promise.all([lerConfig(empresaId), carregarEmitente(empresaId)]);
+
+    let certificado: any = null;
+    const [linhas] = await pool.query<any[]>(
+      `SELECT nome_arquivo, cnpj, razao_social, numero_serie, emissor, valido_de, valido_ate, atualizado_em
+         FROM nfe_certificados WHERE empresa_id = ? LIMIT 1`,
+      [empresaId],
+    );
+    if (linhas.length) {
+      const c = linhas[0];
+      const dias = Math.floor((new Date(c.valido_ate).getTime() - Date.now()) / 86_400_000);
+      certificado = { ...c, diasParaVencer: dias, vencido: dias < 0 };
+    }
+
+    res.json({ config: semSegredos(config), emitente, certificado });
+  }));
+
+  r.put('/config', rota(async (req, res) => {
+    const empresaId = empresaDaRequisicao(req);
+    const atual = await lerConfig(empresaId);
+    const novo = await gravarConfig(empresaId, preservarSegredos(req.body || {}, atual));
+    res.json({ success: true, config: semSegredos(novo) });
+  }));
+
+  r.put('/emitente', rota(async (req, res) => {
+    const empresaId = empresaDaRequisicao(req);
+    const c = req.body || {};
+    const colunas = [
+      'cnpj', 'inscricao_estadual', 'razao_social', 'nome_fantasia', 'logradouro', 'numero',
+      'complemento', 'bairro', 'codigo_municipio', 'municipio', 'uf', 'cep', 'fone', 'crt',
+    ];
+    const campos = colunas.filter((col) => col in c);
+    if (!campos.length) throw new Error('Nenhum campo do emitente foi informado.');
+
+    await pool.query(
+      `UPDATE nfe_empresas SET ${campos.map((f) => `${f} = ?`).join(', ')} WHERE id = ?`,
+      [...campos.map((f) => (typeof c[f] === 'string' ? c[f].trim() : c[f])), empresaId],
+    );
+
+    res.json({ success: true, emitente: await carregarEmitente(empresaId) });
+  }));
+
+  // =========================================================================
+  // Certificado
+  // =========================================================================
+  r.post('/certificado', rota(async (req, res) => {
+    const empresaId = empresaDaRequisicao(req);
+    const { arquivoBase64, nomeArquivo, senha } = req.body || {};
+    if (!arquivoBase64) throw new Error('Envie o arquivo .pfx do certificado.');
+    if (!senha) throw new Error('Informe a senha do certificado.');
+
+    const pfx = Buffer.from(String(arquivoBase64).replace(/^data:[^,]+,/, ''), 'base64');
+    // Falha aqui (senha errada, arquivo inválido) impede gravar lixo no banco
+    const { info } = carregarPfx(pfx, senha);
+
+    await pool.query(
+      `INSERT INTO nfe_certificados
+         (empresa_id, nome_arquivo, arquivo, senha, cnpj, razao_social, numero_serie, emissor, valido_de, valido_ate)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         nome_arquivo = VALUES(nome_arquivo), arquivo = VALUES(arquivo), senha = VALUES(senha),
+         cnpj = VALUES(cnpj), razao_social = VALUES(razao_social), numero_serie = VALUES(numero_serie),
+         emissor = VALUES(emissor), valido_de = VALUES(valido_de), valido_ate = VALUES(valido_ate)`,
+      [
+        empresaId, nomeArquivo || 'certificado.pfx', pfx, senha,
+        info.cnpj, info.razaoSocial, info.numeroSerie, info.emissor,
+        dataHoraMysql(info.validoDe), dataHoraMysql(info.validoAte),
+      ],
+    );
+
+    esquecerCertificado(empresaId);
+    res.json({ success: true, certificado: { ...info, validoDe: paraBR(info.validoDe, false), validoAte: paraBR(info.validoAte, false) } });
+  }));
+
+  r.delete('/certificado', rota(async (req, res) => {
+    const empresaId = empresaDaRequisicao(req);
+    await pool.query('DELETE FROM nfe_certificados WHERE empresa_id = ?', [empresaId]);
+    esquecerCertificado(empresaId);
+    res.json({ success: true });
+  }));
+
+  // =========================================================================
+  // Consultas
+  // =========================================================================
+  r.post('/status', rota(async (req, res) => {
+    res.json(await statusServico(await montarContexto(empresaDaRequisicao(req))));
+  }));
+
+  r.post('/consultar', rota(async (req, res) => {
+    const ctx = await montarContexto(empresaDaRequisicao(req));
+    const ret = await consultarChave(ctx, String(req.body?.chave || ''));
+
+    // A consulta é a forma mais confiável de fechar a situação do documento
+    if (ret.dados?.protocolo) {
+      await pool.query(
+        `UPDATE nfe_documentos SET protocolo = ?, codigo_status = ?, motivo = ?,
+                situacao = CASE WHEN ? = 101 THEN 'cancelada' WHEN ? IN (100,150) THEN 'autorizada' ELSE situacao END
+          WHERE empresa_id = ? AND chave = ?`,
+        [ret.dados.protocolo, ret.cStat, ret.xMotivo, ret.cStat, ret.cStat, ctx.empresaId, req.body.chave],
+      );
+    }
+
+    res.json(ret);
+  }));
+
+  r.post('/consultar-cadastro', rota(async (req, res) => {
+    const ctx = await montarContexto(empresaDaRequisicao(req));
+    const { uf, cnpj, cpf, ie } = req.body || {};
+    res.json(await consultarCadastro(ctx, uf || ctx.config.webservice.uf, { cnpj, cpf, ie }));
+  }));
+
+  r.post('/consultar-recibo', rota(async (req, res) => {
+    const ctx = await montarContexto(empresaDaRequisicao(req));
+    res.json(await consultarRecibo(ctx, String(req.body?.recibo || '')));
+  }));
+
+  // =========================================================================
+  // Emissão
+  // =========================================================================
+
+  /** Gera o XML, assina e guarda como rascunho assinado */
+  r.post('/gerar', rota(async (req, res) => {
+    const empresaId = empresaDaRequisicao(req);
+    const ctx = await montarContexto(empresaId);
+    const documento = req.body?.documento;
+    if (!documento) throw new Error('Informe os dados da nota.');
+
+    const gerada = gerarNFe(ctx, documento);
+    const assinada = assinar(semDeclaracao(gerada.xml), 'infNFe', `NFe${gerada.chave}`, ctx.certificado);
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>${assinada}`;
+
+    const dest = documento.destinatario;
+    await pool.query(
+      `INSERT INTO nfe_documentos
+         (empresa_id, chave, modelo, serie, numero, situacao, ambiente, data_emissao,
+          destinatario_documento, destinatario_nome, valor_total, dados, xml)
+       VALUES (?, ?, ?, ?, ?, 'assinada', ?, ?, ?, ?, ?, CAST(? AS JSON), ?)
+       ON DUPLICATE KEY UPDATE
+         situacao = 'assinada', valor_total = VALUES(valor_total),
+         dados = VALUES(dados), xml = VALUES(xml)`,
+      [
+        empresaId, gerada.chave, gerada.modelo, gerada.serie, gerada.numero,
+        ctx.config.webservice.ambiente, dataHoraMysql(),
+        (dest?.cnpj || dest?.cpf || '').replace(/\D/g, '') || null,
+        dest?.nome || null, gerada.totais.vNF,
+        JSON.stringify(documento), xml,
+      ],
+    );
+
+    res.json({ success: true, chave: gerada.chave, totais: gerada.totais, xml });
+  }));
+
+  /** Transmite para a SEFAZ um XML já assinado (o gerado aqui ou um importado) */
+  r.post('/enviar', rota(async (req, res) => {
+    const empresaId = empresaDaRequisicao(req);
+    const ctx = await montarContexto(empresaId);
+
+    let xml: string = req.body?.xml || '';
+    if (!xml && req.body?.chave) {
+      const [linhas] = await pool.query<any[]>(
+        'SELECT xml FROM nfe_documentos WHERE empresa_id = ? AND chave = ? LIMIT 1',
+        [empresaId, req.body.chave],
+      );
+      xml = linhas[0]?.xml || '';
+    }
+    if (!xml) throw new Error('Informe o XML da NF-e ou a chave de um documento já gerado.');
+
+    const ret = await autorizar(ctx, xml, { sincrono: req.body?.sincrono !== false });
+    const chave = ret.dados?.chave;
+
+    if (chave) {
+      const autorizada = ret.dados?.autorizada;
+      const procNFe = autorizada && ret.dados?.protNFe ? montarProcNFe(xml, ret.dados.protNFe) : null;
+
+      await pool.query(
+        `UPDATE nfe_documentos
+            SET situacao = ?, recibo = ?, protocolo = ?, codigo_status = ?, motivo = ?, xml_protocolo = ?
+          WHERE empresa_id = ? AND chave = ?`,
+        [
+          autorizada ? 'autorizada' : ret.dados?.recibo ? 'enviada' : 'rejeitada',
+          ret.dados?.recibo || null,
+          ret.dados?.protocolo || null,
+          ret.dados?.cStatNota || ret.cStat,
+          ret.dados?.motivoNota || ret.xMotivo,
+          procNFe,
+          empresaId, chave,
+        ],
+      );
+    }
+
+    res.json(ret);
+  }));
+
+  /** Importa um XML de fora (o "Importar TXT/XML" do exemplo) */
+  r.post('/importar', rota(async (req, res) => {
+    const empresaId = empresaDaRequisicao(req);
+    const xml: string = req.body?.xml || '';
+    const chave = (xml.match(/Id="NFe(\d{44})"/) || [])[1];
+    if (!chave) throw new Error('O arquivo não contém uma NF-e com chave de acesso.');
+
+    const protNFe = recortarElemento(xml, 'protNFe');
+    await pool.query(
+      `INSERT INTO nfe_documentos
+         (empresa_id, chave, modelo, serie, numero, situacao, ambiente, data_emissao,
+          destinatario_nome, valor_total, xml, xml_protocolo)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE xml = VALUES(xml), xml_protocolo = VALUES(xml_protocolo)`,
+      [
+        empresaId, chave, chave.slice(20, 22), Number(chave.slice(22, 25)), Number(chave.slice(25, 34)),
+        protNFe ? 'autorizada' : 'assinada', Number(valorTag(xml, 'tpAmb') || 2),
+        dataHoraMysql(), valorTag(recortarElemento(xml, 'dest') || '', 'xNome'),
+        Number(valorTag(xml, 'vNF') || 0), xml, protNFe,
+      ],
+    );
+
+    res.json({ success: true, chave });
+  }));
+
+  r.post('/validar-assinatura', rota(async (req, res) => {
+    res.json(conferirAssinatura(String(req.body?.xml || '')));
+  }));
+
+  // =========================================================================
+  // Eventos e inutilização
+  // =========================================================================
+  r.post('/evento', rota(async (req, res) => {
+    const empresaId = empresaDaRequisicao(req);
+    const ctx = await montarContexto(empresaId);
+    const ret = await enviarEvento(ctx, req.body || {});
+
+    await pool.query(
+      `INSERT INTO nfe_eventos
+         (empresa_id, chave, tipo_evento, descricao, sequencia, ambiente, data_evento,
+          justificativa, protocolo, codigo_status, motivo, xml, xml_retorno)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        empresaId, req.body.chave.replace(/\D/g, ''), ret.dados?.tipoEvento, ret.dados?.descricao,
+        ret.dados?.sequencia, ctx.config.webservice.ambiente, dataHoraMysql(),
+        req.body.justificativa || req.body.correcao || null,
+        ret.dados?.protocolo || null, ret.cStat, ret.xMotivo,
+        ret.dados?.xmlEnvio || null, ret.dados?.procEventoNFe || ret.xml,
+      ],
+    );
+
+    // Cancelamento aceito fecha o documento
+    if (ret.sucesso && ret.dados?.tipoEvento === '110111') {
+      await pool.query(
+        `UPDATE nfe_documentos SET situacao = 'cancelada' WHERE empresa_id = ? AND chave = ?`,
+        [empresaId, req.body.chave.replace(/\D/g, '')],
+      );
+    }
+
+    res.json(ret);
+  }));
+
+  r.post('/inutilizar', rota(async (req, res) => {
+    const empresaId = empresaDaRequisicao(req);
+    const ctx = await montarContexto(empresaId);
+    const p = {
+      ano: Number(req.body?.ano) || new Date().getFullYear(),
+      modelo: String(req.body?.modelo || ctx.config.geral.modeloDF),
+      serie: Number(req.body?.serie) || 1,
+      numeroInicial: Number(req.body?.numeroInicial),
+      numeroFinal: Number(req.body?.numeroFinal),
+      justificativa: String(req.body?.justificativa || ''),
+    };
+
+    const ret = await inutilizar(ctx, p);
+
+    await pool.query(
+      `INSERT INTO nfe_inutilizacoes
+         (empresa_id, ano, modelo, serie, numero_inicial, numero_final, justificativa,
+          ambiente, protocolo, codigo_status, motivo, xml, xml_retorno)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        empresaId, p.ano, p.modelo, p.serie, p.numeroInicial, p.numeroFinal, p.justificativa,
+        ctx.config.webservice.ambiente, ret.dados?.protocolo || null, ret.cStat, ret.xMotivo,
+        ret.dados?.xmlEnvio || null, ret.dados?.procInutNFe || ret.xml,
+      ],
+    );
+
+    res.json(ret);
+  }));
+
+  // =========================================================================
+  // Distribuição DF-e
+  // =========================================================================
+  r.post('/distribuicao', rota(async (req, res) => {
+    const empresaId = empresaDaRequisicao(req);
+    const ctx = await montarContexto(empresaId);
+    const ret = await distribuicaoDFe(ctx, req.body || {});
+
+    for (const d of ret.dados?.documentos || []) {
+      await pool.query(
+        `INSERT INTO nfe_distribuicao
+           (empresa_id, nsu, schema_doc, chave, tipo, emitente_nome, valor, data_documento, xml)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE xml = VALUES(xml)`,
+        [
+          empresaId, d.nsu, d.schema, d.chave || null, d.tipo, d.emitente || null,
+          d.valor, d.data ? dataHoraMysql(new Date(d.data)) : null, d.xml,
+        ],
+      );
+    }
+
+    res.json(ret);
+  }));
+
+  // =========================================================================
+  // DANFE e e-mail
+  // =========================================================================
+  r.post('/danfe', rota(async (req, res) => {
+    const empresaId = empresaDaRequisicao(req);
+    const config = await lerConfig(empresaId);
+
+    let xml: string = req.body?.xml || '';
+    if (!xml && req.body?.chave) {
+      const [linhas] = await pool.query<any[]>(
+        'SELECT xml, xml_protocolo FROM nfe_documentos WHERE empresa_id = ? AND chave = ? LIMIT 1',
+        [empresaId, req.body.chave],
+      );
+      xml = linhas[0]?.xml_protocolo || linhas[0]?.xml || '';
+    }
+    if (!xml) throw new Error('Nenhum XML encontrado para gerar o DANFE.');
+
+    const pdf = await gerarDanfe(xml, {
+      logo: config.danfe.logoMarca,
+      homologacao: Number(valorTag(xml, 'tpAmb')) === 2,
+      paisagem: config.danfe.tipoDanfe === 1,
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="DANFE-${req.body?.chave || 'nfe'}.pdf"`);
+    res.send(pdf);
+  }));
+
+  r.post('/email', rota(async (req, res) => {
+    const empresaId = empresaDaRequisicao(req);
+    const config = await lerConfig(empresaId);
+    const { chave, para, assunto, mensagem, anexarPdf } = req.body || {};
+
+    const [linhas] = await pool.query<any[]>(
+      'SELECT chave, numero, serie, xml, xml_protocolo, data_emissao FROM nfe_documentos WHERE empresa_id = ? AND chave = ? LIMIT 1',
+      [empresaId, chave],
+    );
+    if (!linhas.length) throw new Error('Documento não encontrado.');
+    const d = linhas[0];
+    const xml = d.xml_protocolo || d.xml;
+
+    const anexos = [{ nome: `${d.chave}-nfe.xml`, conteudo: xml, tipo: 'application/xml' }];
+    if (anexarPdf !== false) {
+      anexos.push({
+        nome: `${d.chave}-danfe.pdf`,
+        conteudo: (await gerarDanfe(xml, { homologacao: Number(valorTag(xml, 'tpAmb')) === 2 })) as any,
+        tipo: 'application/pdf',
+      });
+    }
+
+    const emitente = await carregarEmitente(empresaId);
+    const envio = await enviarEmail(config.email, {
+      para, assunto, mensagem, anexos,
+      variaveis: {
+        numero: String(d.numero),
+        serie: String(d.serie),
+        chave: d.chave,
+        dataEmissao: paraBR(d.data_emissao, false),
+        razaoSocial: emitente.razao_social,
+      },
+    });
+
+    res.json({ success: true, ...envio });
+  }));
+
+  r.post('/email/testar', rota(async (req, res) => {
+    const config = await lerConfig(empresaDaRequisicao(req));
+    await testarSmtp(config.email);
+    res.json({ success: true });
+  }));
+
+  // =========================================================================
+  // Listagens
+  // =========================================================================
+  const listagem = (tabela: string, ordem: string, colunas: string) =>
+    rota(async (req, res) => {
+      const empresaId = empresaDaRequisicao(req);
+      const limite = Math.min(Number(req.query.limite) || 100, 500);
+      const [linhas] = await pool.query<any[]>(
+        `SELECT ${colunas} FROM ${tabela} WHERE empresa_id = ? ORDER BY ${ordem} DESC LIMIT ?`,
+        [empresaId, limite],
+      );
+      res.json(linhas);
+    });
+
+  r.get('/documentos', listagem(
+    'nfe_documentos', 'id',
+    'id, chave, modelo, serie, numero, situacao, ambiente, data_emissao, destinatario_nome, valor_total, protocolo, codigo_status, motivo',
+  ));
+
+  r.get('/documentos/:chave', rota(async (req, res) => {
+    const empresaId = empresaDaRequisicao(req);
+    if (!chaveValida(req.params.chave)) throw new Error('Chave de acesso inválida.');
+    const [linhas] = await pool.query<any[]>(
+      'SELECT * FROM nfe_documentos WHERE empresa_id = ? AND chave = ? LIMIT 1',
+      [empresaId, req.params.chave],
+    );
+    if (!linhas.length) throw new Error('Documento não encontrado.');
+    res.json(linhas[0]);
+  }));
+
+  r.get('/eventos', listagem(
+    'nfe_eventos', 'id',
+    'id, chave, tipo_evento, descricao, sequencia, data_evento, protocolo, codigo_status, motivo',
+  ));
+
+  r.get('/inutilizacoes', listagem(
+    'nfe_inutilizacoes', 'id',
+    'id, ano, modelo, serie, numero_inicial, numero_final, justificativa, protocolo, codigo_status, motivo, criado_em',
+  ));
+
+  r.get('/distribuicao', listagem(
+    'nfe_distribuicao', 'CAST(nsu AS UNSIGNED)',
+    'id, nsu, schema_doc, chave, tipo, emitente_nome, valor, data_documento, manifestado',
+  ));
+
+  r.get('/log', listagem(
+    'nfe_log', 'id',
+    'id, operacao, url, chave, sucesso, codigo_status, motivo, duracao_ms, criado_em',
+  ));
+
+  r.get('/log/:id', rota(async (req, res) => {
+    const empresaId = empresaDaRequisicao(req);
+    const [linhas] = await pool.query<any[]>(
+      'SELECT * FROM nfe_log WHERE empresa_id = ? AND id = ? LIMIT 1',
+      [empresaId, Number(req.params.id)],
+    );
+    if (!linhas.length) throw new Error('Registro de log não encontrado.');
+    res.json(linhas[0]);
+  }));
+
+  return r;
+}

@@ -1,0 +1,65 @@
+/**
+ * Datas no horário de Brasília (UTC-03:00).
+ *
+ * A SEFAZ exige o offset explícito nos campos dhEmi / dhEvento, e o banco guarda
+ * a hora local. Nada aqui usa toISOString(), que converteria para UTC e jogaria a
+ * data para o dia seguinte depois das 21h.
+ */
+
+/** Deslocamento fixo de Brasília. Não há mais horário de verão desde 2019. */
+export const FUSO_BRASILIA = '-03:00';
+
+const MS_BRASILIA = -3 * 60 * 60 * 1000;
+
+/** "Agora" em Brasília, como um Date cujos campos locais (getFullYear etc.) já são os de lá */
+export function agora(): Date {
+  const d = new Date();
+  return new Date(d.getTime() + d.getTimezoneOffset() * 60 * 1000 + MS_BRASILIA);
+}
+
+function p2(n: number) {
+  return String(n).padStart(2, '0');
+}
+
+/** "2026-09-20" */
+export function dataISO(d: Date = agora()): string {
+  return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+}
+
+/** "2026-09-20 14:32:05" — formato aceito pelo MySQL */
+export function dataHoraMysql(d: Date = agora()): string {
+  return `${dataISO(d)} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
+}
+
+/** "2026-09-20T14:32:05-03:00" — formato dhEmi / dhEvento do layout da NF-e */
+export function dataHoraDFe(d: Date = agora()): string {
+  return `${dataISO(d)}T${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}${FUSO_BRASILIA}`;
+}
+
+/** "AAMM" usado na chave de acesso */
+export function anoMesChave(d: Date = agora()): string {
+  return `${String(d.getFullYear()).slice(2)}${p2(d.getMonth() + 1)}`;
+}
+
+/** "20/09/2026 14:32:05" para exibição e para o DANFE */
+export function paraBR(valor: string | Date | null | undefined, comHora = true): string {
+  if (!valor) return '';
+  let d: Date;
+  if (valor instanceof Date) {
+    d = valor;
+  } else {
+    // Aceita "2026-09-20 14:32:05", "2026-09-20T14:32:05-03:00" e "2026-09-20"
+    const m = String(valor).match(/^(\d{4})-(\d{2})-(\d{2})[T ]?(\d{2})?:?(\d{2})?:?(\d{2})?/);
+    if (!m) return String(valor);
+    d = new Date(
+      Number(m[1]),
+      Number(m[2]) - 1,
+      Number(m[3]),
+      Number(m[4] || 0),
+      Number(m[5] || 0),
+      Number(m[6] || 0),
+    );
+  }
+  const data = `${p2(d.getDate())}/${p2(d.getMonth() + 1)}/${d.getFullYear()}`;
+  return comHora ? `${data} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}` : data;
+}

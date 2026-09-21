@@ -1,0 +1,160 @@
+/**
+ * Conferência rápida das partes que, se quebrarem, a SEFAZ rejeita tudo:
+ * dígito da chave de acesso, validação de CNPJ/CPF, resolução das URLs no
+ * ACBrNFeServicos.ini, montagem de XML e soma dos totais.
+ *
+ * Rode com:  npx tsx server/nfe/autoteste.ts
+ */
+import assert from 'assert';
+import { chaveValida, cnpjValido, cpfValido, digitoChave, lerChave, montarChave } from './chave';
+import { resolverDistribuicaoDFe, resolverServico, ufPorCodigo } from './servicos';
+import { grupo, limparTexto, num, tag } from './xml';
+import { somarTotais } from './gerarNFe';
+import { anoMesChave, dataHoraDFe } from './datas';
+
+function conferir(nome: string, fn: () => void) {
+  fn();
+  console.log(`  ok  ${nome}`);
+}
+
+console.log('Autoteste do núcleo NF-e\n');
+
+// --- Chave de acesso ------------------------------------------------------
+conferir('dígito verificador da chave confere com a tabela de pesos do ACBr', () => {
+  // Mesma constante PESO do ACBrDFeUtil.GerarDigito, aplicada da esquerda para a
+  // direita. A implementação do projeto gira os pesos 2..9 da direita para a
+  // esquerda; os dois caminhos têm de chegar ao mesmo dígito.
+  const PESO = '4329876543298765432987654329876543298765432';
+  const referencia = (chave43: string) => {
+    let soma = 0;
+    for (let i = 0; i < 43; i++) soma += Number(chave43[i]) * Number(PESO[i]);
+    return soma % 11 < 2 ? 0 : 11 - (soma % 11);
+  };
+
+  const amostras = [
+    '3516070532113600016155001000000109110000109',
+    '4319050764282300012855001000000011000000100',
+    '3526090532113600016165001000000017112345678',
+  ];
+
+  for (const base of amostras) {
+    const esperado = referencia(base);
+    assert.strictEqual(digitoChave(base), esperado, `DV divergente em ${base}`);
+    assert.ok(chaveValida(base + esperado));
+    assert.ok(!chaveValida(base + ((esperado + 1) % 10)));
+  }
+});
+
+conferir('montagem e releitura da chave', () => {
+  const emissao = new Date(2026, 8, 20); // setembro/2026
+  const { chave } = montarChave({
+    uf: 'SP',
+    emissao,
+    cnpj: '05321136000161',
+    modelo: '55',
+    serie: 1,
+    numero: 10,
+    tipoEmissao: 1,
+    codigoNumerico: 11000010,
+  });
+
+  assert.strictEqual(chave.length, 44);
+  assert.ok(chaveValida(chave), 'a chave montada precisa passar na própria validação');
+
+  const lida = lerChave(chave);
+  assert.strictEqual(lida.cUF, 35);
+  assert.strictEqual(lida.cnpj, '05321136000161');
+  assert.strictEqual(lida.modelo, '55');
+  assert.strictEqual(lida.serie, 1);
+  assert.strictEqual(lida.numero, 10);
+  assert.strictEqual(chave.slice(2, 6), anoMesChave(emissao));
+});
+
+conferir('cNF nunca sai igual ao nNF (rejeição 539)', () => {
+  const { chave } = montarChave({
+    uf: 'SP', emissao: new Date(2026, 0, 1), cnpj: '05321136000161',
+    modelo: '55', serie: 1, numero: 777, tipoEmissao: 1, codigoNumerico: 777,
+  });
+  assert.notStrictEqual(lerChave(chave).codigoNumerico, '00000777');
+});
+
+// --- Documentos -----------------------------------------------------------
+conferir('CNPJ e CPF', () => {
+  assert.ok(cnpjValido('05.321.136/0001-17'));
+  assert.ok(!cnpjValido('05321136000118'));
+  assert.ok(!cnpjValido('11111111111111'));
+  assert.ok(cpfValido('529.982.247-25'));
+  assert.ok(!cpfValido('52998224726'));
+});
+
+// --- Webservices ----------------------------------------------------------
+conferir('resolução das URLs no ACBrNFeServicos.ini', () => {
+  const sp = resolverServico('NFe', 'SP', 2, 'NFeStatusServico');
+  assert.ok(sp.url.startsWith('https://'), 'SP precisa devolver URL https');
+  assert.ok(sp.soapAction.includes('nfeStatusServicoNF'));
+
+  // AC não publica serviço próprio: o .ini redireciona com Usar=NFe_SVRS_H
+  const ac = resolverServico('NFe', 'AC', 2, 'NFeStatusServico');
+  assert.ok(ac.url.includes('svrs'), `esperava redirecionamento para o SVRS, veio ${ac.url}`);
+
+  const dist = resolverDistribuicaoDFe(1);
+  assert.ok(dist.url.includes('NFeDistribuicaoDFe'));
+  assert.ok(dist.soapAction.endsWith('/nfeDistDFeInteresse'));
+
+  assert.strictEqual(ufPorCodigo(35), 'SP');
+});
+
+conferir('serviço inexistente falha com mensagem clara', () => {
+  assert.throws(
+    () => resolverServico('NFe', 'ZZ', 2, 'NFeStatusServico'),
+    /Sessão "NFe_ZZ_H" não existe/,
+  );
+});
+
+// --- XML ------------------------------------------------------------------
+conferir('construtor de XML omite vazios e escapa o conteúdo', () => {
+  assert.strictEqual(tag('xNome', 'Casa & Cia'), '<xNome>Casa &amp; Cia</xNome>');
+  assert.strictEqual(tag('xCpl', ''), '');
+  assert.strictEqual(tag('xCpl', undefined), '');
+  assert.strictEqual(grupo('vol', '', ''), '', 'grupo sem filhos não deve ser gerado');
+  assert.strictEqual(grupo('vol', tag('qVol', 2)), '<vol><qVol>2</qVol></vol>');
+  assert.strictEqual(num(1.005, 2), '1.01');
+  assert.strictEqual(num(undefined, 2), '0.00');
+  assert.strictEqual(limparTexto('  Ação   com\nacento  '), 'Acao com acento');
+});
+
+conferir('dhEmi sai no horário de Brasília, com offset explícito', () => {
+  const texto = dataHoraDFe(new Date(2026, 8, 20, 22, 15, 30));
+  assert.strictEqual(texto, '2026-09-20T22:15:30-03:00');
+});
+
+// --- Totais ---------------------------------------------------------------
+conferir('soma dos totais da nota', () => {
+  const totais = somarTotais([
+    {
+      codigo: '1', descricao: 'A', ncm: '84713012', cfop: '5102', unidade: 'UN',
+      quantidade: 3, valorUnitario: 10.5, valorDesconto: 1.5,
+      imposto: {
+        origem: 0, cst: '00', baseCalculo: 30, aliquota: 18, valor: 5.4,
+        pis: { cst: '01', valor: 0.52 }, cofins: { cst: '01', valor: 2.39 },
+      },
+    },
+    {
+      codigo: '2', descricao: 'B', ncm: '84713012', cfop: '5102', unidade: 'UN',
+      quantidade: 1, valorUnitario: 100, valorFrete: 10,
+      imposto: {
+        origem: 0, cst: '40',
+        pis: { cst: '07' }, cofins: { cst: '07' },
+      },
+    },
+  ] as any);
+
+  assert.strictEqual(totais.vProd, 131.5);
+  assert.strictEqual(totais.vDesc, 1.5);
+  assert.strictEqual(totais.vFrete, 10);
+  assert.strictEqual(totais.vICMS, 5.4);
+  // vNF = produtos - desconto + frete
+  assert.strictEqual(totais.vNF, 140);
+});
+
+console.log('\nTudo certo.');

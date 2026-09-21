@@ -1,0 +1,187 @@
+import 'dotenv/config';
+import express, { Request, Response } from 'express';
+import path from 'path';
+import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
+import { createServer as createViteServer } from 'vite';
+import { pool, checkDbHealth } from './server/db';
+import { criarRotasNFe } from './server/rotas/nfe';
+import { carregarCertificado } from './server/nfe/contexto';
+import { lerConfig } from './server/config';
+
+const PORT = Number(process.env.PORT) || 3000;
+
+/** Aceita bcrypt e os formatos legados que ainda aparecem em bases antigas */
+function senhaConfere(informada: string, gravada: string): boolean {
+  if (!gravada?.trim()) return false;
+
+  if (/^\$2[aby]\$/.test(gravada)) {
+    try {
+      if (bcrypt.compareSync(informada, gravada)) return true;
+    } catch {
+      // segue para os demais formatos
+    }
+  }
+
+  if (informada === gravada) return true;
+
+  for (const algoritmo of ['md5', 'sha256', 'sha1']) {
+    const hash = crypto.createHash(algoritmo).update(informada).digest('hex');
+    if (hash.toLowerCase() === gravada.toLowerCase()) return true;
+  }
+
+  return false;
+}
+
+async function iniciar() {
+  const app = express();
+  // O .pfx e os XMLs em base64 passam do limite padrão de 100kb
+  app.use(express.json({ limit: '25mb' }));
+
+  // =========================================================================
+  // Autenticação: CNPJ do emitente + usuário + senha
+  // =========================================================================
+  app.post('/api/login', async (req: Request, res: Response) => {
+    try {
+      const { cnpj, usuario, senha } = req.body || {};
+      const login = String(usuario || '').trim().toLowerCase();
+      const cnpjLimpo = String(cnpj || '').replace(/\D/g, '');
+
+      if (cnpjLimpo.length !== 14 || !login) {
+        return res.status(400).json({ success: false, error: 'Informe o CNPJ do emitente e o usuário.' });
+      }
+
+      const [empresas] = await pool.query<any[]>(
+        'SELECT * FROM nfe_empresas WHERE cnpj = ? LIMIT 1',
+        [cnpjLimpo],
+      );
+      if (!empresas.length) {
+        return res.status(401).json({ success: false, error: 'Nenhum emitente cadastrado com este CNPJ.' });
+      }
+
+      const empresa = empresas[0];
+      if (!empresa.ativo) {
+        return res.status(401).json({ success: false, error: 'Este emitente está inativo.' });
+      }
+
+      const [usuarios] = await pool.query<any[]>(
+        `SELECT id, empresa_id, nome, email, senha_hash, cargo
+           FROM nfe_usuarios
+          WHERE empresa_id = ? AND (LOWER(TRIM(email)) = ? OR LOWER(TRIM(nome)) = ?) AND ativo = 1
+          LIMIT 1`,
+        [empresa.id, login, login],
+      );
+      if (!usuarios.length) {
+        return res.status(401).json({ success: false, error: `Usuário "${login}" não localizado neste emitente.` });
+      }
+
+      const encontrado = usuarios[0];
+      if (!senhaConfere(String(senha || ''), encontrado.senha_hash)) {
+        return res.status(401).json({ success: false, error: 'Senha incorreta.' });
+      }
+
+      // Senha em formato legado é reescrita em bcrypt no primeiro acesso
+      if (!/^\$2[aby]\$/.test(encontrado.senha_hash)) {
+        await pool.query('UPDATE nfe_usuarios SET senha_hash = ? WHERE id = ?', [
+          bcrypt.hashSync(String(senha), 10),
+          encontrado.id,
+        ]);
+      }
+
+      delete encontrado.senha_hash;
+      res.json({ success: true, usuario: encontrado, empresa });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // =========================================================================
+  // Painel
+  // =========================================================================
+  app.get('/api/db/status', async (_req, res) => {
+    res.json(await checkDbHealth());
+  });
+
+  app.get('/api/painel', async (req: Request, res: Response) => {
+    try {
+      const empresaId = Number(req.header('x-empresa-id'));
+      if (!empresaId) return res.status(400).json({ error: 'Sessão sem empresa.' });
+
+      const [[contagens]] = await pool.query<any[]>(
+        `SELECT
+           (SELECT COUNT(*) FROM nfe_documentos WHERE empresa_id = ?) AS documentos,
+           (SELECT COUNT(*) FROM nfe_documentos WHERE empresa_id = ? AND situacao = 'autorizada') AS autorizadas,
+           (SELECT COUNT(*) FROM nfe_documentos WHERE empresa_id = ? AND situacao = 'cancelada') AS canceladas,
+           (SELECT COUNT(*) FROM nfe_documentos WHERE empresa_id = ? AND situacao = 'rejeitada') AS rejeitadas,
+           (SELECT COALESCE(SUM(valor_total),0) FROM nfe_documentos WHERE empresa_id = ? AND situacao = 'autorizada') AS valor_autorizado,
+           (SELECT COUNT(*) FROM nfe_eventos WHERE empresa_id = ?) AS eventos,
+           (SELECT COUNT(*) FROM nfe_inutilizacoes WHERE empresa_id = ?) AS inutilizacoes,
+           (SELECT COUNT(*) FROM nfe_distribuicao WHERE empresa_id = ?) AS distribuidos`,
+        Array(8).fill(empresaId),
+      );
+
+      const [ultimos] = await pool.query<any[]>(
+        `SELECT chave, numero, serie, situacao, valor_total, data_emissao, destinatario_nome, motivo
+           FROM nfe_documentos WHERE empresa_id = ? ORDER BY id DESC LIMIT 8`,
+        [empresaId],
+      );
+
+      const [erros] = await pool.query<any[]>(
+        `SELECT operacao, codigo_status, motivo, criado_em
+           FROM nfe_log WHERE empresa_id = ? AND sucesso = 0 ORDER BY id DESC LIMIT 5`,
+        [empresaId],
+      );
+
+      const config = await lerConfig(empresaId);
+
+      let certificado: any = null;
+      try {
+        const { info } = await carregarCertificado(empresaId);
+        certificado = {
+          razaoSocial: info.razaoSocial,
+          cnpj: info.cnpj,
+          validoAte: info.validoAte,
+          diasParaVencer: info.diasParaVencer,
+        };
+      } catch (err: any) {
+        certificado = { erro: err.message };
+      }
+
+      res.json({
+        contagens,
+        ultimos,
+        erros,
+        certificado,
+        ambiente: config.webservice.ambiente,
+        uf: config.webservice.uf,
+        modelo: config.geral.modeloDF,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.use('/api', criarRotasNFe());
+
+  // =========================================================================
+  // VITE / SPA
+  // =========================================================================
+  if (process.env.NODE_ENV !== 'production') {
+    const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
+  }
+
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`nfeWeb rodando em http://0.0.0.0:${PORT}`);
+    console.log(`MySQL: ${process.env.MYSQL_HOST || 'localhost'} / ${process.env.MYSQL_DATABASE || 'nfeweb'}`);
+  });
+}
+
+iniciar().catch((err) => {
+  console.error('Falha ao iniciar o nfeWeb:', err);
+  process.exit(1);
+});
